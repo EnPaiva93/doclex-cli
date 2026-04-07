@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class FileRecord:
+    path: str
+    hash: str
+    mtime: float
+    size: int
+    mime_type: str
+    status: str  # pending | indexed | error
+    id: int | None = None
+    indexed_at: float | None = None
+    error_msg: str | None = None
+
+
+@dataclass
+class ExtractedDoc:
+    path: str
+    text: str
+    mime_type: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class Segment:
+    id: str           # sha256(path + location_label + str(location_index))
+    file_path: str
+    content: str
+    location_type: str   # page | sheet | section | block | table
+    location_label: str  # "Page 3", "Sheet: Ventas", "# Introducción"
+    location_index: int
+    char_count: int = 0
+    bm25_doc_id: int | None = None  # internal BM25X index assigned on add()
+
+    def __post_init__(self) -> None:
+        if not self.char_count:
+            self.char_count = len(self.content)
+
+
+@dataclass
+class SearchResult:
+    segment_id: str
+    score: float
+    file_path: str
+    mime_type: str
+    location_type: str
+    location_label: str
+    content: str
+    snippet: str  # ~200 chars alrededor del match

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "docsearch"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "kreuzberg",
+    "bm25x",
+    "watchdog",
+    "aiosqlite",
+    "typer",
+]
+
+[project.scripts]
+docsearch = "docsearch.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docsearch"]
