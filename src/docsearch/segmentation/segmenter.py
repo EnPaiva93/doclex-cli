@@ -12,49 +12,52 @@ from docsearch.metadata.models import ExtractedDoc, Segment
 # Minimum chars for a segment to be worth indexing
 _MIN_CHARS = 30
 
+# Maximum chars per segment — recursive splitter enforces this
+_MAX_CHARS = 1024
+
 # Headings: Markdown / plain text
 _HEADING_RE = re.compile(
     r"(?:^|\n)(#{1,3}\s+.+|(?=\S).+\n[=\-]{3,})", re.MULTILINE
 )
 
+# Separators tried in order by the recursive splitter
+_SEPARATORS = ["\n\n", "\n", " "]
+
 
 def segment(doc: ExtractedDoc) -> list[Segment]:
-    """Segment an ExtractedDoc into indexable units based on file type."""
+    """Segment an ExtractedDoc into indexable units based on file type.
+
+    Strategy:
+    1. Structure-based segmentation (headings, pages, sheets, tables)
+    2. Any segment > _MAX_CHARS is recursively split preserving semantic boundaries
+    """
     suffix = Path(doc.path).suffix.lower()
 
     if suffix == ".pdf":
-        return _segment_pdf(doc)
+        raw = _segment_pdf(doc)
     elif suffix in (".xlsx",):
-        return _segment_spreadsheet(doc)
+        raw = _segment_spreadsheet(doc)
     elif suffix == ".csv":
-        return _segment_csv(doc)
+        raw = _segment_csv(doc)
     elif suffix in (".docx", ".md", ".txt"):
-        return _segment_text(doc)
+        raw = _segment_text(doc)
     else:
-        return _segment_fallback(doc)
+        raw = _segment_fallback(doc)
+
+    return _apply_size_limit(raw, _MAX_CHARS)
 
 
 # ------------------------------------------------------------------
-# PDF — page-by-page via Kreuzberg metadata or form-feed split
+# PDF — page-by-page via form-feed split, fallback to full text
 # ------------------------------------------------------------------
 
 def _segment_pdf(doc: ExtractedDoc) -> list[Segment]:
-    """Try to extract PDF page-by-page; fall back to text blocks."""
-    try:
-        config = ExtractionConfig(disable_ocr=True, result_format="element_based")
-        result = extract_file_sync(doc.path, None, config)
-        # element_based returns content with page markers in metadata
-        page_count = result.metadata.get("page_count") or result.metadata.get("pages")
-    except KreuzbergError:
-        page_count = None
-
-    # Try form-feed split (\f separates pages in many PDF extractors)
+    """Try to split PDF by page (form-feed); fall back to full document block."""
     pages = doc.text.split("\f")
     if len(pages) > 1:
         return _make_segments(doc, pages, "page", "Page")
 
-    # Fall back to blocks of ~1500 chars
-    return _segment_by_blocks(doc, block_size=1500, location_type="block", label_prefix="Block")
+    return _segment_fallback(doc)
 
 
 # ------------------------------------------------------------------
@@ -77,7 +80,6 @@ def _segment_spreadsheet(doc: ExtractedDoc) -> list[Segment]:
     except KreuzbergError:
         pass
 
-    # Fallback: treat full text as a single table segment
     return _segment_fallback(doc)
 
 
@@ -117,7 +119,7 @@ def _segment_text(doc: ExtractedDoc) -> list[Segment]:
     if not text:
         return []
 
-    # Split on Markdown headings (# / ## / ###) or underline headings
+    # Split on Markdown headings (# / ## / ###)
     parts = re.split(r"\n(?=#{1,3} )", text)
 
     if len(parts) <= 1:
@@ -146,6 +148,96 @@ def _segment_fallback(doc: ExtractedDoc) -> list[Segment]:
     if len(text) < _MIN_CHARS:
         return []
     return [_make_segment(doc, text, "block", "Document", 0)]
+
+
+# ------------------------------------------------------------------
+# Size enforcement — recursive character splitter
+# ------------------------------------------------------------------
+
+def _apply_size_limit(segments: list[Segment], max_chars: int) -> list[Segment]:
+    """Post-process segments: split any that exceed max_chars."""
+    result: list[Segment] = []
+    for seg in segments:
+        result.extend(_split_if_too_long(seg, max_chars))
+    return result
+
+
+def _split_if_too_long(seg: Segment, max_chars: int) -> list[Segment]:
+    """Return the segment as-is if within limit, or split it recursively."""
+    if len(seg.content) <= max_chars:
+        return [seg]
+
+    chunks = _recursive_split(seg.content, max_chars, _SEPARATORS)
+
+    result: list[Segment] = []
+    for i, chunk in enumerate(chunks):
+        chunk = chunk.strip()
+        if len(chunk) < _MIN_CHARS:
+            continue
+        sub_label = f"{seg.location_label} › {i + 1}"
+        sub_index = seg.location_index * 1000 + i
+        result.append(Segment(
+            id=_segment_id(seg.file_path, sub_label, sub_index),
+            file_path=seg.file_path,
+            content=chunk,
+            location_type=seg.location_type,
+            location_label=sub_label,
+            location_index=sub_index,
+            char_count=len(chunk),
+        ))
+
+    # Guard: never drop a valid segment entirely
+    return result if result else [seg]
+
+
+def _recursive_split(text: str, max_chars: int, separators: list[str]) -> list[str]:
+    """Split text into chunks of at most max_chars using the coarsest separator first.
+
+    Strategy:
+    1. Try to split on the coarsest separator.
+    2. Greedily merge consecutive pieces back together up to max_chars.
+    3. Pieces that are still too large are recursively split with the next separator.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    if not separators:
+        # Hard character slice as last resort
+        return [text[i : i + max_chars] for i in range(0, len(text), max_chars)]
+
+    sep, *remaining = separators
+    raw_parts = text.split(sep)
+
+    if len(raw_parts) == 1:
+        # Separator not present in this text — try the next one
+        return _recursive_split(text, max_chars, remaining)
+
+    # First pass: recursively handle pieces that are individually too large
+    good_parts: list[str] = []
+    for part in raw_parts:
+        part = part.strip()
+        if not part:
+            continue
+        if len(part) <= max_chars:
+            good_parts.append(part)
+        else:
+            good_parts.extend(_recursive_split(part, max_chars, remaining))
+
+    # Second pass: greedy merge — combine consecutive parts up to max_chars
+    chunks: list[str] = []
+    current = ""
+    for part in good_parts:
+        candidate = (current + sep + part).strip() if current else part
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            if current:
+                chunks.append(current)
+            current = part
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 # ------------------------------------------------------------------
@@ -187,26 +279,8 @@ def _make_segment(
     )
 
 
-def _segment_by_blocks(
-    doc: ExtractedDoc,
-    block_size: int,
-    location_type: str,
-    label_prefix: str,
-) -> list[Segment]:
-    text = doc.text.strip()
-    segments: list[Segment] = []
-    for i in range(0, len(text), block_size):
-        chunk = text[i : i + block_size].strip()
-        if len(chunk) < _MIN_CHARS:
-            continue
-        label = f"{label_prefix} {i // block_size + 1}"
-        segments.append(_make_segment(doc, chunk, location_type, label, i // block_size))
-    return segments
-
-
 def _table_to_text(table: object) -> str:
     """Convert a Kreuzberg ExtractedTable to plain text."""
-    # ExtractedTable has .rows (list of lists) or .content
     if hasattr(table, "content") and table.content:
         return str(table.content)
     if hasattr(table, "rows") and table.rows:

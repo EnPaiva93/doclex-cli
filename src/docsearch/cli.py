@@ -51,13 +51,13 @@ def index(
             )
             with Progress(
                 SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
                 MofNCompleteColumn(),
                 TimeElapsedColumn(),
+                TextColumn("[progress.description]{task.description}"),
                 console=console,
             ) as progress:
-                task = progress.add_task("Indexing…", total=total)
+                task = progress.add_task("", total=total)
 
                 def on_progress(path: Path, action: str) -> None:
                     progress.update(task, advance=1, description=f"[cyan]{action}[/cyan] {path.name}")
@@ -87,6 +87,7 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     folder: Path = typer.Option(..., "--folder", "-f", envvar="DOCSEARCH_FOLDER", help="Indexed folder"),
     top_k: int = typer.Option(10, "--top", "-k", help="Number of results to return"),
+    full: bool = typer.Option(False, "--full", "-F", help="Show full segment text instead of snippet"),
 ) -> None:
     """Search indexed documents and show results with citations."""
     pipeline = _get_pipeline(folder)
@@ -110,7 +111,8 @@ def search(
                 f"[dim]{r.location_label}[/dim]  "
                 f"[yellow](score: {r.score:.3f})[/yellow]"
             )
-            console.print(f'    [italic]"{r.snippet}"[/italic]')
+            text = r.content if full else r.snippet
+            console.print(f'    [italic]"{text}"[/italic]')
             console.print()
 
     asyncio.run(run())
