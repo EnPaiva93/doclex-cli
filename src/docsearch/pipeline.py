@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
+from typing import Awaitable
 
 from docsearch.cache.store import CacheStore
 from docsearch.config import Config
@@ -54,15 +55,25 @@ class Pipeline:
     async def reconcile(self) -> ChangeSet:
         return await reconcile(self._config.folder, self._db)
 
-    async def apply_changes(self, changes: ChangeSet) -> None:
+    async def apply_changes(
+        self,
+        changes: ChangeSet,
+        on_progress: Callable[[Path, str], None] | None = None,
+    ) -> None:
         for path in changes.new:
+            if on_progress:
+                on_progress(path, "indexing")
             await self._process_file(path)
 
         for path in changes.modified:
+            if on_progress:
+                on_progress(path, "updating")
             await self._remove_file(str(path))
             await self._process_file(path)
 
         for path_str in changes.deleted:
+            if on_progress:
+                on_progress(Path(path_str), "removing")
             await self._remove_file(path_str)
 
     # ------------------------------------------------------------------

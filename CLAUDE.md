@@ -339,4 +339,3 @@ DocSearch MCP debe convertir una carpeta local de documentos en un corpus buscab
 - Instalar dependencias con uv, no con pip
 - Usar pyproject.toml para gestión del proyecto
 - No crear archivos de código sin antes mostrar el plan completo y recibir confirmación
-- Antes de cualquier nueva implementación genera un commit message de una linea sobre el diff
