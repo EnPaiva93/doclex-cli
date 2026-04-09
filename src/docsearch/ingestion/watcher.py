@@ -31,7 +31,7 @@ class _Handler(FileSystemEventHandler):
     def _schedule(self, path: str, event_type: str) -> None:
         if not self._is_supported(path):
             return
-        if ".cache" in Path(path).parts:
+        if ".docsearch" in Path(path).parts:
             return
         with self._lock:
             if path in self._timers:

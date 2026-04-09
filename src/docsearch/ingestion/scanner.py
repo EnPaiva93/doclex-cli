@@ -42,8 +42,8 @@ async def reconcile(folder: Path, db: Database) -> ChangeSet:
     on_disk: dict[str, Path] = {}
     for path in folder.rglob("*"):
         if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            # Skip the .cache directory itself
-            if ".cache" in path.parts:
+            # Skip the .docsearch directory itself
+            if ".docsearch" in path.parts:
                 continue
             on_disk[str(path)] = path
 

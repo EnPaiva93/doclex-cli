@@ -18,7 +18,7 @@ class Config:
         self.cache_dir = (
             Path(cache_env).expanduser().resolve()
             if cache_env
-            else self.folder / ".cache"
+            else self.folder / ".docsearch"
         )
 
         db_env = os.environ.get("DOCSEARCH_DB_PATH")

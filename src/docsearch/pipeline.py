@@ -9,7 +9,7 @@ from docsearch.cache.store import CacheStore
 from docsearch.config import Config
 from docsearch.extraction.extractor import ExtractionError, extract
 from docsearch.index.bm25_index import BM25Index, make_snippet
-from docsearch.ingestion.scanner import ChangeSet, file_record_from_disk, reconcile
+from docsearch.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
 from docsearch.ingestion.watcher import FileWatcher
 from docsearch.metadata.db import Database
 from docsearch.metadata.models import FileRecord, SearchResult
@@ -120,6 +120,22 @@ class Pipeline:
         await self._process_file(path)
         self._index.save()
 
+    async def reindex_all(
+        self,
+        on_progress: Callable[[Path, str], None] | None = None,
+    ) -> None:
+        """Force re-extraction and re-indexing of every file currently in the corpus."""
+        files = await self._db.get_all_files()
+        for rec in files:
+            path = Path(rec.path)
+            if not path.exists():
+                continue
+            if on_progress:
+                on_progress(path, "reindexing")
+            await self._remove_file(str(path))
+            await self._process_file(path)
+        self._index.save()
+
     async def search(self, query: str, top_k: int | None = None) -> list[SearchResult]:
         k = top_k or self._config.top_k
         query = query.strip()
@@ -166,13 +182,43 @@ class Pipeline:
     async def corpus_status(self) -> dict:
         files = await self._db.get_all_files()
         segments = await self._db.get_all_segments()
+        # Only reconcile if there's already an index — avoids scanning large filesystems
+        has_index = len(files) > 0
+        changes = await reconcile(self._config.folder, self._db) if has_index else ChangeSet(new=[], modified=[], deleted=[])
         return {
             "folder": str(self._config.folder),
             "files_total": len(files),
             "files_indexed": sum(1 for f in files if f.status == "indexed"),
             "files_error": sum(1 for f in files if f.status == "error"),
+            "files_pending": sum(1 for f in files if f.status == "pending"),
             "segments_total": len(segments),
             "index_size": len(self._index),
+            "pending_new": len(changes.new),
+            "pending_modified": len(changes.modified),
+            "pending_deleted": len(changes.deleted),
+            "has_index": has_index,
+        }
+
+    async def get_file_status(self, path: Path) -> dict:
+        """Return detailed status of a specific file: DB record, segments, disk state."""
+        record = await self._db.get_file_by_path(str(path))
+        on_disk = path.exists()
+        is_modified = False
+        segments: list = []
+
+        if on_disk and record:
+            current_hash = file_hash(path)
+            is_modified = current_hash != record.hash
+        if record and record.id is not None:
+            segments = await self._db.get_segments_for_file(record.id)
+
+        return {
+            "path": str(path),
+            "on_disk": on_disk,
+            "in_index": record is not None,
+            "is_modified": is_modified,
+            "record": record,
+            "segments": segments,
         }
 
     # ------------------------------------------------------------------

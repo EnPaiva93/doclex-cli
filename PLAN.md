@@ -162,7 +162,7 @@ El índice BM25X se persiste en `.cache/bm25_index/` usando la persistencia nati
 | Variable               | Default                        |
 |------------------------|--------------------------------|
 | `DOCSEARCH_FOLDER`     | requerido                      |
-| `DOCSEARCH_CACHE_DIR`  | `{folder}/.cache`              |
+| `DOCSEARCH_CACHE_DIR`  | `{folder}/.docsearch`          |
 | `DOCSEARCH_DB_PATH`    | `{cache_dir}/docsearch.db`     |
 | `DOCSEARCH_TOP_K`      | `10`                           |
 | `DOCSEARCH_DEBOUNCE`   | `1.0` segundos                 |
