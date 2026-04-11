@@ -19,11 +19,18 @@ app = typer.Typer(
 console = Console(width=220)
 
 
-def _get_pipeline(folder: Path) -> Pipeline:
+def _get_pipeline(folder: Path, *, create: bool = False) -> Pipeline:
     import os
     os.environ["DOCSEARCH_FOLDER"] = str(folder)
     config = Config()
-    config.ensure_dirs()
+    if create:
+        config.ensure_dirs()
+    elif not config.cache_dir.exists():
+        console.print(
+            f"[yellow]No index found for[/yellow] [bold]{folder}[/bold]. "
+            "Run [bold]docsearch index <folder>[/bold] first."
+        )
+        raise typer.Exit(0)
     return Pipeline(config)
 
 
@@ -61,7 +68,7 @@ def index(
         raise typer.Exit(1)
 
     root = folder if is_file else target
-    pipeline = _get_pipeline(root)
+    pipeline = _get_pipeline(root, create=True)
 
     async def run() -> None:
         await pipeline.startup()

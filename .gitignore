@@ -8,3 +8,5 @@ dist/
 .env
 ANDE Files/
 .claude/
+.agents/
+skills-lock.json
