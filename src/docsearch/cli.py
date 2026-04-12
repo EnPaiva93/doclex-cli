@@ -40,13 +40,13 @@ def _get_pipeline(folder: Path, *, create: bool = False, ocr: bool = False) -> P
 
 @app.command()
 def index(
-    target: Path = typer.Argument(
-        ...,
-        help="Folder to scan, or a single file to (re)index.",
+    folder: Path = typer.Option(
+        ..., "--folder", "-f", envvar="DOCSEARCH_FOLDER",
+        help="Root folder that owns the index.",
     ),
-    folder: Path | None = typer.Option(
-        None, "--folder", "-f", envvar="DOCSEARCH_FOLDER",
-        help="Root folder that owns the index (required when TARGET is a file).",
+    files: list[Path] | None = typer.Option(
+        None, "--files",
+        help="One or more specific files to (re)index. Must be inside --folder.",
     ),
     force: bool = typer.Option(
         False, "--force",
@@ -57,40 +57,53 @@ def index(
         help="Enable OCR for scanned PDFs using RT-DETR v2 (slower, requires kreuzberg[ocr]).",
     ),
 ) -> None:
-    """Index a folder or re-index a specific file.
+    """Index a folder or re-index specific files.
 
     \b
     Examples:
-      docsearch index ./docs                      # incremental scan
-      docsearch index ./docs --force              # reindex everything
-      docsearch index ./docs --ocr                # enable OCR for scanned PDFs
-      docsearch index report.pdf --folder ./docs  # reindex one file
+      docsearch index --folder ./docs                              # incremental scan
+      docsearch index --folder ./docs --force                      # reindex everything
+      docsearch index --folder ./docs --files report.pdf           # reindex one file
+      docsearch index --folder ./docs --files a.pdf b.docx --ocr  # reindex with OCR
     """
-    is_file = target.is_file()
-
-    if is_file and folder is None:
-        console.print("[red]Error:[/red] --folder is required when TARGET is a file.")
+    if files and force:
+        console.print("[red]Error:[/red] --files and --force are mutually exclusive.")
         raise typer.Exit(1)
 
-    root = folder if is_file else target
-    pipeline = _get_pipeline(root, create=True, ocr=ocr)
+    if files:
+        folder_resolved = folder.resolve()
+        for f in files:
+            if not f.exists():
+                console.print(f"[red]Error:[/red] File not found: {f}")
+                raise typer.Exit(1)
+            if not f.resolve().is_relative_to(folder_resolved):
+                console.print(f"[red]Error:[/red] {f} is not inside {folder}")
+                raise typer.Exit(1)
+
+    pipeline = _get_pipeline(folder, create=True, ocr=ocr)
 
     async def run() -> None:
         await pipeline.startup()
 
-        # ── Single-file reindex ──────────────────────────────────────
-        if is_file:
-            with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
-                spin.add_task(f"Reindexing [bold]{target.name}[/bold]…")
-                await pipeline.reindex_file(target)
-            console.print(f"[green]✓[/green] Reindexed [bold]{target.name}[/bold]")
+        # ── Specific files reindex ───────────────────────────────────
+        if files:
+            with Progress(
+                SpinnerColumn(), BarColumn(), MofNCompleteColumn(),
+                TimeElapsedColumn(), TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("", total=len(files))
+                for f in files:
+                    progress.update(task, advance=1, description=f"[cyan]reindexing[/cyan] {f.name}")
+                    await pipeline.reindex_file(f)
+            console.print(f"[green]✓[/green] Reindexed {len(files)} file(s).")
             await pipeline.shutdown()
             return
 
         # ── Force full reindex ───────────────────────────────────────
         if force:
-            files = await pipeline.list_files()
-            total = len(files)
+            all_files = await pipeline.list_files()
+            total = len(all_files)
             if total == 0:
                 console.print("[yellow]No files in index to reindex.[/yellow]")
                 await pipeline.shutdown()
@@ -152,11 +165,11 @@ def index(
 
 @app.command()
 def search(
-    query: str = typer.Argument(..., help="Search query (natural language or keywords)."),
     folder: Path = typer.Option(
         ..., "--folder", "-f", envvar="DOCSEARCH_FOLDER",
         help="Root folder of the index to search.",
     ),
+    query: str = typer.Option(..., "--query", "-q", help="Search query (natural language or keywords)."),
     top_k: int = typer.Option(10, "--top", "-k", help="Maximum number of results to return."),
     full: bool = typer.Option(
         False, "--full", "-F",
@@ -167,8 +180,8 @@ def search(
 
     \b
     Examples:
-      docsearch search "GT/DPM" --folder ./docs
-      docsearch search "presupuesto 2024" --folder ./docs --top 5 --full
+      docsearch search --folder ./docs --query "GT/DPM"
+      docsearch search --folder ./docs --query "presupuesto 2024" --top 5 --full
     """
     pipeline = _get_pipeline(folder)
 
@@ -204,16 +217,16 @@ def search(
 
 @app.command()
 def status(
-    target: Path | None = typer.Argument(
-        None,
-        help="Optional: path to a specific file to inspect.",
-    ),
     folder: Path = typer.Option(
         ..., "--folder", "-f", envvar="DOCSEARCH_FOLDER",
         help="Root folder of the index.",
     ),
-    files: bool = typer.Option(
-        False, "--files",
+    files: list[Path] | None = typer.Option(
+        None, "--files",
+        help="Inspect one or more specific files.",
+    ),
+    list_all: bool = typer.Option(
+        False, "--list",
         help="List all indexed files with their status.",
     ),
     filter_status: str | None = typer.Option(
@@ -221,33 +234,32 @@ def status(
         help="Filter file list by status: indexed | error | pending.",
     ),
 ) -> None:
-    """Show corpus status, optionally listing files or inspecting a specific file.
+    """Show corpus status, optionally listing files or inspecting specific files.
 
     \b
     Examples:
-      docsearch status --folder ./docs               # corpus summary
-      docsearch status --folder ./docs --files       # list all files
-      docsearch status --folder ./docs --files --filter error
-      docsearch status report.pdf --folder ./docs    # inspect one file
+      docsearch status --folder ./docs                              # corpus summary
+      docsearch status --folder ./docs --list                       # list all files
+      docsearch status --folder ./docs --list --filter error        # filtered list
+      docsearch status --folder ./docs --files report.pdf r3.pdf   # inspect specific files
     """
     pipeline = _get_pipeline(folder)
 
     async def run() -> None:
         await pipeline.startup()
 
-        # ── Single-file inspect ──────────────────────────────────────
-        if target is not None:
-            info = await pipeline.get_file_status(target)
-            await pipeline.shutdown()
+        # ── Specific-file inspect ────────────────────────────────────
+        if files:
+            for f in files:
+                info = await pipeline.get_file_status(f)
 
-            rec = info["record"]
-            console.print()
-            _row = lambda k, v: (k, str(v))
+                rec = info["record"]
+                console.print()
 
-            t = Table(show_header=False, box=None, padding=(0, 2))
-            t.add_column(style="bold dim")
-            t.add_column()
-            t.add_row("File", str(target))
+                t = Table(show_header=False, box=None, padding=(0, 2))
+                t.add_column(style="bold dim")
+                t.add_column()
+                t.add_row("File", str(f))
             t.add_row("On disk", "[green]yes[/green]" if info["on_disk"] else "[red]no[/red]")
             t.add_row("In index", "[green]yes[/green]" if info["in_index"] else "[yellow]no[/yellow]")
 
@@ -260,11 +272,13 @@ def status(
                 if rec.error_msg:
                     t.add_row("Error", f"[red]{rec.error_msg}[/red]")
 
-            console.print(t)
+                console.print(t)
+
+            await pipeline.shutdown()
             return
 
         # ── File list ────────────────────────────────────────────────
-        if files:
+        if list_all:
             file_list = await pipeline.list_files(filter_status)
             await pipeline.shutdown()
 
@@ -309,7 +323,7 @@ def status(
         t.add_row("Segments", str(info["segments_total"]))
 
         if not info["has_index"]:
-            t.add_row("Disk state", "[yellow]not indexed — run docsearch index <folder>[/yellow]")
+            t.add_row("Disk state", "[yellow]not indexed — run docsearch index --folder <folder>[/yellow]")
         else:
             pending_total = info["pending_new"] + info["pending_modified"] + info["pending_deleted"]
             if pending_total:
