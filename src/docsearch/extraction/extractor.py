@@ -8,17 +8,18 @@ from kreuzberg.exceptions import KreuzbergError
 from docsearch.metadata.models import ExtractedDoc
 
 
-_CONFIG = ExtractionConfig(disable_ocr=True)
-
-
-def extract(path: Path) -> ExtractedDoc:
+def extract(path: Path, *, ocr: bool = False) -> ExtractedDoc:
     """Extract text from a file using Kreuzberg.
+
+    Args:
+        ocr: Enable OCR for scanned PDFs (uses RT-DETR v2). Slower and heavier.
 
     Raises:
         ExtractionError: if Kreuzberg fails to extract the file.
     """
+    config = ExtractionConfig(disable_ocr=not ocr)
     try:
-        result = extract_file_sync(str(path), None, _CONFIG)
+        result = extract_file_sync(str(path), None, config)
     except (KreuzbergError, OSError) as exc:
         raise ExtractionError(str(path), str(exc)) from exc
 

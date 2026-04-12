@@ -19,8 +19,9 @@ from docsearch.segmentation.segmenter import segment
 class Pipeline:
     """Orchestrates extraction → segmentation → index → metadata."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, *, ocr: bool = False) -> None:
         self._config = config
+        self._ocr = ocr
         self._db = Database(config.db_path)
         self._cache = CacheStore(config.cache_dir)
         self._index = BM25Index(config.bm25_index_dir)
@@ -85,7 +86,7 @@ class Pipeline:
         file_id = await self._db.upsert_file(record)
 
         try:
-            doc = extract(path)
+            doc = extract(path, ocr=self._ocr)
             segments = segment(doc)
 
             if not segments:

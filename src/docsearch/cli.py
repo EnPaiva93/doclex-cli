@@ -19,7 +19,7 @@ app = typer.Typer(
 console = Console(width=220)
 
 
-def _get_pipeline(folder: Path, *, create: bool = False) -> Pipeline:
+def _get_pipeline(folder: Path, *, create: bool = False, ocr: bool = False) -> Pipeline:
     import os
     os.environ["DOCSEARCH_FOLDER"] = str(folder)
     config = Config()
@@ -31,7 +31,7 @@ def _get_pipeline(folder: Path, *, create: bool = False) -> Pipeline:
             "Run [bold]docsearch index <folder>[/bold] first."
         )
         raise typer.Exit(0)
-    return Pipeline(config)
+    return Pipeline(config, ocr=ocr)
 
 
 # ------------------------------------------------------------------
@@ -52,6 +52,10 @@ def index(
         False, "--force",
         help="Force re-extraction of every file, ignoring cached state.",
     ),
+    ocr: bool = typer.Option(
+        False, "--ocr",
+        help="Enable OCR for scanned PDFs using RT-DETR v2 (slower, requires kreuzberg[ocr]).",
+    ),
 ) -> None:
     """Index a folder or re-index a specific file.
 
@@ -59,6 +63,7 @@ def index(
     Examples:
       docsearch index ./docs                      # incremental scan
       docsearch index ./docs --force              # reindex everything
+      docsearch index ./docs --ocr                # enable OCR for scanned PDFs
       docsearch index report.pdf --folder ./docs  # reindex one file
     """
     is_file = target.is_file()
@@ -68,7 +73,7 @@ def index(
         raise typer.Exit(1)
 
     root = folder if is_file else target
-    pipeline = _get_pipeline(root, create=True)
+    pipeline = _get_pipeline(root, create=True, ocr=ocr)
 
     async def run() -> None:
         await pipeline.startup()
