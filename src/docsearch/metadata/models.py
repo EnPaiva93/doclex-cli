@@ -22,7 +22,7 @@ class ExtractedDoc:
     text: str
     mime_type: str
     metadata: dict = field(default_factory=dict)
-    tables: list = field(default_factory=list)  # kreuzberg tables when precise=True
+    tables: list = field(default_factory=list)      # kreuzberg tables when precise=True
 
 
 @dataclass
@@ -35,6 +35,8 @@ class Segment:
     location_index: int
     char_count: int = 0
     bm25_doc_id: int | None = None  # internal BM25X index assigned on add()
+    section_id: str | None = None   # reference to tree node id
+    level: int = 0                  # heading level (1-3); 0 for non-heading nodes
 
     def __post_init__(self) -> None:
         if not self.char_count:

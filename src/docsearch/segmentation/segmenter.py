@@ -141,18 +141,48 @@ def _segment_text(doc: ExtractedDoc) -> list[Segment]:
     parts = re.split(r"\n(?=#{1,3} )", text)
 
     if len(parts) <= 1:
-        # No headings — split on blank lines
+        # No headings — split on blank lines, no tree structure
         parts = re.split(r"\n{2,}", text)
+        segments: list[Segment] = []
+        for i, part in enumerate(parts):
+            part = part.strip()
+            if len(part) < _MIN_CHARS:
+                continue
+            first_line = part.splitlines()[0].lstrip("#").strip()
+            label = first_line[:80] if first_line else f"Block {i + 1}"
+            segments.append(_make_segment(doc, part, "block", label, i))
+        return segments or _segment_fallback(doc)
 
-    segments: list[Segment] = []
+    # Parse heading parts
+    parsed: list[tuple[int, str, str, str, int]] = []  # (level, title, node_id, content, index)
     for i, part in enumerate(parts):
         part = part.strip()
-        if len(part) < _MIN_CHARS:
+        if not part:
             continue
-        first_line = part.splitlines()[0].lstrip("#").strip()
-        label = first_line[:80] if first_line else f"Block {i + 1}"
-        location_type = "section" if part.startswith("#") else "block"
-        segments.append(_make_segment(doc, part, location_type, label, i))
+        first_line = part.splitlines()[0]
+        m = re.match(r"^(#{1,3}) ", first_line)
+        level = len(m.group(1)) if m else 0
+        title = first_line.lstrip("#").strip()[:80] or f"Block {i + 1}"
+        node_id = _segment_id(doc.path, title, i)
+        parsed.append((level, title, node_id, part, i))
+
+    # Create segments with level and section_id
+    segments = []
+    for level, title, node_id, content, i in parsed:
+        if len(content) < _MIN_CHARS:
+            continue
+        location_type = "section" if level <= 2 else "block"
+        segments.append(Segment(
+            id=node_id,
+            file_path=doc.path,
+            content=content,
+            location_type=location_type,
+            location_label=title,
+            location_index=i,
+            char_count=len(content),
+            section_id=node_id,
+            level=level,
+        ))
 
     return segments or _segment_fallback(doc)
 
@@ -202,6 +232,8 @@ def _split_if_too_long(seg: Segment, max_chars: int) -> list[Segment]:
             location_label=sub_label,
             location_index=sub_index,
             char_count=len(chunk),
+            section_id=seg.section_id,
+            level=seg.level,
         ))
 
     # Guard: never drop a valid segment entirely
