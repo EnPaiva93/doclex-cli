@@ -52,12 +52,30 @@ def segment(doc: ExtractedDoc) -> list[Segment]:
 # ------------------------------------------------------------------
 
 def _segment_pdf(doc: ExtractedDoc) -> list[Segment]:
-    """Try to split PDF by page (form-feed); fall back to full document block."""
-    pages = doc.text.split("\f")
-    if len(pages) > 1:
-        return _make_segments(doc, pages, "page", "Page")
+    """Segment PDF: markdown-based when precise mode produced headings, otherwise page-based."""
+    segments: list[Segment] = []
 
-    return _segment_fallback(doc)
+    if _has_markdown_headings(doc.text):
+        # precise mode: Kreuzberg returned markdown with heading structure
+        segments = _segment_text(doc)
+    else:
+        pages = doc.text.split("\f")
+        segments = _make_segments(doc, pages, "page", "Page") if len(pages) > 1 else _segment_fallback(doc)
+
+    # Append table segments from precise mode (result.tables)
+    if doc.tables:
+        offset = len(segments)
+        for i, table in enumerate(doc.tables):
+            content = _table_to_text(table)
+            if len(content) >= _MIN_CHARS:
+                label = getattr(table, "name", None) or f"Table {i + 1}"
+                segments.append(_make_segment(doc, content, "table", label, offset + i))
+
+    return segments or _segment_fallback(doc)
+
+
+def _has_markdown_headings(text: str) -> bool:
+    return bool(re.search(r"(?:^|\n)#{1,3} ", text))
 
 
 # ------------------------------------------------------------------
@@ -66,7 +84,7 @@ def _segment_pdf(doc: ExtractedDoc) -> list[Segment]:
 
 def _segment_spreadsheet(doc: ExtractedDoc) -> list[Segment]:
     try:
-        config = ExtractionConfig(disable_ocr=True)
+        config = ExtractionConfig()
         result = extract_file_sync(doc.path, None, config)
         if result.tables:
             segments: list[Segment] = []
@@ -89,7 +107,7 @@ def _segment_spreadsheet(doc: ExtractedDoc) -> list[Segment]:
 
 def _segment_csv(doc: ExtractedDoc) -> list[Segment]:
     try:
-        config = ExtractionConfig(disable_ocr=True)
+        config = ExtractionConfig()
         result = extract_file_sync(doc.path, None, config)
         if result.tables:
             content = _table_to_text(result.tables[0])

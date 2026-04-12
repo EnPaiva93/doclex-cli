@@ -2,32 +2,61 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kreuzberg import ExtractionConfig, extract_file_sync
+from kreuzberg import ExtractionConfig, LayoutDetectionConfig, OutputFormat, ResultFormat, extract_file_sync
 from kreuzberg.exceptions import KreuzbergError
 
 from docsearch.metadata.models import ExtractedDoc
 
 
-def extract(path: Path, *, ocr: bool = False) -> ExtractedDoc:
+def extract(path: Path, *, precise: bool = False) -> ExtractedDoc:
     """Extract text from a file using Kreuzberg.
 
     Args:
-        ocr: Enable OCR for scanned PDFs (uses RT-DETR v2). Slower and heavier.
+        precise: Enable layout detection (RT-DETR v2 / TATR) for structured
+                 element-based segmentation. Slower on first run (downloads model).
 
     Raises:
         ExtractionError: if Kreuzberg fails to extract the file.
     """
-    config = ExtractionConfig(disable_ocr=not ocr)
+    if precise:
+        config = ExtractionConfig(
+            layout=LayoutDetectionConfig(),
+            output_format=OutputFormat.MARKDOWN,
+            result_format=ResultFormat.UNIFIED,
+        )
+    else:
+        config = ExtractionConfig()
+
     try:
         result = extract_file_sync(str(path), None, config)
     except (KreuzbergError, OSError) as exc:
         raise ExtractionError(str(path), str(exc)) from exc
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as exc:
+        # pyo3_runtime.PanicException inherits from BaseException, not Exception.
+        # Catch Kreuzberg Rust panics (e.g. UTF-8 char boundary bug in markdown renderer)
+        # and fall back to standard extraction so the file is not lost.
+        if precise and "char boundary" in str(exc):
+            try:
+                result = extract_file_sync(str(path), None, ExtractionConfig())
+            except (KreuzbergError, OSError) as exc2:
+                raise ExtractionError(str(path), str(exc2)) from exc2
+        else:
+            raise ExtractionError(str(path), str(exc)) from exc
+
+    tables = list(result.tables) if precise and result.tables else []
+
+    metadata = dict(result.metadata) if result.metadata else {}
+    if "pages" in metadata and isinstance(metadata["pages"], dict):
+        metadata["pages"].pop("boundaries", None)
 
     return ExtractedDoc(
         path=str(path),
         text=result.content or "",
         mime_type=result.mime_type or _mime_from_suffix(path),
-        metadata=dict(result.metadata) if result.metadata else {},
+        metadata=metadata,
+        tables=tables,
     )
 
 
