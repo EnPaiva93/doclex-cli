@@ -85,9 +85,11 @@ def _build_index(title: str, segments: list[Segment]) -> dict:
                 title, _ = _extract_heading(node.get("content", ""))
                 if title:
                     _, body = _extract_heading(node.get("content", ""))
+                    group_id = node["id"]
+                    node["id"] = hashlib.sha256((group_id + "|body").encode()).hexdigest()[:32]
                     node["content"] = body
                     parent_node: dict = {
-                        "id": node["id"] + "_group",
+                        "id": group_id,
                         "title": title,
                         "location_type": node.get("location_type", "section"),
                         "content": "",
@@ -100,7 +102,8 @@ def _build_index(title: str, segments: list[Segment]) -> dict:
                     stack[-1][1]["nodes"].append(node)
                     stack.append((0, node))
 
-    _drop_redundant_titles(root)
+    _assign_navigation_links(root)
+    _clean_nodes(root)
     return root
 
 
@@ -116,12 +119,35 @@ def _extract_heading(content: str) -> tuple[str, str]:
     return title, body
 
 
-def _drop_redundant_titles(node: dict) -> None:
-    """Remove title from heading leaf nodes — it's already the first line of content."""
+def _assign_navigation_links(root: dict) -> None:
+    """Assign prev_id, next_id, parent_id to every node in pre-order (reading order)."""
+    flat: list[tuple[dict, str | None]] = []
+
+    def collect(nodes: list, parent_id: str | None) -> None:
+        for node in nodes:
+            flat.append((node, parent_id))
+            collect(node.get("nodes", []), node["id"])
+
+    collect(root.get("nodes", []), None)
+
+    for i, (node, parent_id) in enumerate(flat):
+        node["parent_id"] = parent_id
+        node["prev_id"] = flat[i - 1][0]["id"] if i > 0 else None
+        node["next_id"] = flat[i + 1][0]["id"] if i < len(flat) - 1 else None
+
+
+def _clean_nodes(node: dict) -> None:
+    """Clean node titles and content to remove redundancy:
+    - Leaf nodes: drop title (content is sufficient)
+    - Non-leaf heading nodes: keep title, strip heading line from content
+    """
     for child in node.get("nodes", []):
-        _drop_redundant_titles(child)
-    if not node.get("nodes") and node.get("level", 0) > 0:
+        _clean_nodes(child)
+    if not node.get("nodes"):
         node.pop("title", None)
+    elif node.get("level", 0) > 0 and node.get("title"):
+        _, body = _extract_heading(node.get("content", ""))
+        node["content"] = body
 
 
 def _seg_to_node(seg: Segment) -> dict:
