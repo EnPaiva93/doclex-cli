@@ -8,24 +8,17 @@ from kreuzberg.exceptions import KreuzbergError
 from docsearch.metadata.models import ExtractedDoc
 
 
-def extract(path: Path, *, precise: bool = False) -> ExtractedDoc:
-    """Extract text from a file using Kreuzberg.
-
-    Args:
-        precise: Enable layout detection (RT-DETR v2 / TATR) for structured
-                 element-based segmentation. Slower on first run (downloads model).
+def extract(path: Path) -> ExtractedDoc:
+    """Extract text from a file using Kreuzberg with layout detection (RT-DETR v2 / TATR).
 
     Raises:
         ExtractionError: if Kreuzberg fails to extract the file.
     """
-    if precise:
-        config = ExtractionConfig(
-            layout=LayoutDetectionConfig(),
-            output_format=OutputFormat.MARKDOWN,
-            result_format=ResultFormat.UNIFIED,
-        )
-    else:
-        config = ExtractionConfig()
+    config = ExtractionConfig(
+        layout=LayoutDetectionConfig(),
+        output_format=OutputFormat.MARKDOWN,
+        result_format=ResultFormat.UNIFIED,
+    )
 
     try:
         result = extract_file_sync(str(path), None, config)
@@ -37,7 +30,7 @@ def extract(path: Path, *, precise: bool = False) -> ExtractedDoc:
         # pyo3_runtime.PanicException inherits from BaseException, not Exception.
         # Catch Kreuzberg Rust panics (e.g. UTF-8 char boundary bug in markdown renderer)
         # and fall back to standard extraction so the file is not lost.
-        if precise and "char boundary" in str(exc):
+        if "char boundary" in str(exc):
             try:
                 result = extract_file_sync(str(path), None, ExtractionConfig())
             except (KreuzbergError, OSError) as exc2:
@@ -45,7 +38,7 @@ def extract(path: Path, *, precise: bool = False) -> ExtractedDoc:
         else:
             raise ExtractionError(str(path), str(exc)) from exc
 
-    tables = list(result.tables) if precise and result.tables else []
+    tables = list(result.tables) if result.tables else []
 
     metadata = dict(result.metadata) if result.metadata else {}
     if "pages" in metadata and isinstance(metadata["pages"], dict):

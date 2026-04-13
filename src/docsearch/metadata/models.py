@@ -22,7 +22,7 @@ class ExtractedDoc:
     text: str
     mime_type: str
     metadata: dict = field(default_factory=dict)
-    tables: list = field(default_factory=list)      # kreuzberg tables when precise=True
+    tables: list = field(default_factory=list)      # kreuzberg extracted tables
 
 
 @dataclass

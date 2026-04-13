@@ -19,7 +19,7 @@ app = typer.Typer(
 console = Console(width=220)
 
 
-def _get_pipeline(folder: Path, *, create: bool = False, precise: bool = False) -> Pipeline:
+def _get_pipeline(folder: Path, *, create: bool = False) -> Pipeline:
     import os
     os.environ["DOCSEARCH_FOLDER"] = str(folder)
     config = Config()
@@ -31,7 +31,7 @@ def _get_pipeline(folder: Path, *, create: bool = False, precise: bool = False) 
             "Run [bold]docsearch index <folder>[/bold] first."
         )
         raise typer.Exit(0)
-    return Pipeline(config, precise=precise)
+    return Pipeline(config)
 
 
 # ------------------------------------------------------------------
@@ -52,20 +52,15 @@ def index(
         False, "--force",
         help="Force re-extraction of every file, ignoring cached state.",
     ),
-    precise: bool = typer.Option(
-        False, "--precise",
-        help="Enable layout detection for structured segmentation (slower on first run, downloads model).",
-    ),
 ) -> None:
     """Index a folder or re-index specific files.
 
     \b
     Examples:
-      docsearch index --folder ./docs                              # incremental scan
-      docsearch index --folder ./docs --force                      # reindex everything
-      docsearch index --folder ./docs --files report.pdf           # reindex one file
-      docsearch index --folder ./docs --precise                    # layout detection
-      docsearch index --folder ./docs --files a.pdf b.docx --precise
+      docsearch index --folder ./docs                        # incremental scan
+      docsearch index --folder ./docs --force                # reindex everything
+      docsearch index --folder ./docs --files report.pdf     # reindex one file
+      docsearch index --folder ./docs --files a.pdf b.docx
     """
     if files and force:
         console.print("[red]Error:[/red] --files and --force are mutually exclusive.")
@@ -81,7 +76,7 @@ def index(
                 console.print(f"[red]Error:[/red] {f} is not inside {folder}")
                 raise typer.Exit(1)
 
-    pipeline = _get_pipeline(folder, create=True, precise=precise)
+    pipeline = _get_pipeline(folder, create=True)
 
     async def run() -> None:
         await pipeline.startup()
@@ -159,12 +154,11 @@ def index(
 
     asyncio.run(run())
 
-    # ONNX Runtime (used by --precise layout detection) crashes during Python
-    # interpreter shutdown when the GC tries to free native session objects.
-    # os._exit bypasses the GC teardown; all work is already saved to disk.
-    if precise:
-        import os
-        os._exit(0)
+    # ONNX Runtime (layout detection) crashes during Python interpreter shutdown
+    # when the GC tries to free native session objects. os._exit bypasses GC
+    # teardown; all work is already saved to disk.
+    import os
+    os._exit(0)
 
 
 # ------------------------------------------------------------------
