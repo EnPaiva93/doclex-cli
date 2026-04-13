@@ -323,6 +323,7 @@ def status(
             + (f"  [yellow]{info['files_pending']} pending[/yellow]" if info["files_pending"] else ""),
         )
         t.add_row("Segments", str(info["segments_total"]))
+        t.add_row("BM25 index", str(info["index_size"]) + " docs")
 
         if not info["has_index"]:
             t.add_row("Disk state", "[yellow]not indexed — run docsearch index --folder <folder>[/yellow]")

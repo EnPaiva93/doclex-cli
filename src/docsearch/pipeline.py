@@ -44,7 +44,8 @@ class Pipeline:
         else:
             segments = await self._db.get_all_segments()
             if segments:
-                self._index.rebuild_from_segments(segments)
+                doc_ids = self._index.rebuild_from_segments(segments)
+                await self._db.update_bm25_doc_ids(segments, doc_ids)
             else:
                 self._index.load_or_create()
 
@@ -134,7 +135,11 @@ class Pipeline:
                 on_progress(path, "reindexing")
             await self._remove_file(str(path))
             await self._process_file(path)
-        self._index.save()
+
+        # Rebuild BM25 from scratch to eliminate ghost entries from incremental soft-deletes
+        segments = await self._db.get_all_segments()
+        doc_ids = self._index.rebuild_from_segments(segments)
+        await self._db.update_bm25_doc_ids(segments, doc_ids)
 
     async def search(self, query: str, top_k: int | None = None) -> list[SearchResult]:
         k = top_k or self._config.top_k

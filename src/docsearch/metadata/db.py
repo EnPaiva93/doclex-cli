@@ -198,6 +198,14 @@ class Database:
         await self.conn.execute("DELETE FROM segments WHERE file_id = ?", (file_id,))
         await self.conn.commit()
 
+    async def update_bm25_doc_ids(self, segments: list, doc_ids: list[int]) -> None:
+        """Update bm25_doc_id for each segment after an index rebuild."""
+        await self.conn.executemany(
+            "UPDATE segments SET bm25_doc_id = ? WHERE id = ?",
+            [(doc_id, seg.id) for seg, doc_id in zip(segments, doc_ids)],
+        )
+        await self.conn.commit()
+
     async def get_all_segments(self) -> list[Segment]:
         """Used to rebuild the BM25 index on startup."""
         async with self.conn.execute(

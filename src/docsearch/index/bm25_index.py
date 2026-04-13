@@ -25,13 +25,15 @@ class BM25Index:
             self._dir.mkdir(parents=True, exist_ok=True)
             self._index = BM25()
 
-    def rebuild_from_segments(self, segments: list[Segment]) -> None:
-        """Rebuild the full index from a list of segments (used at startup)."""
+    def rebuild_from_segments(self, segments: list[Segment]) -> list[int]:
+        """Rebuild the full index from a list of segments. Returns new bm25_doc_ids."""
         self._dir.mkdir(parents=True, exist_ok=True)
         self._index = BM25()
+        doc_ids: list[int] = []
         if segments:
-            self._index.add([s.content for s in segments])
+            doc_ids = self._index.add([s.content for s in segments])
         self.save()
+        return doc_ids
 
     @property
     def _bm25(self) -> BM25:
