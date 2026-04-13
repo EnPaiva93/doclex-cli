@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from docsearch.metadata.models import ExtractedDoc, Segment
@@ -69,14 +70,58 @@ def _build_index(title: str, segments: list[Segment]) -> dict:
     stack: list[tuple[int, dict]] = [(0, root)]
     for seg in segments:
         node = _seg_to_node(seg)
-        level = seg.level if seg.level > 0 else stack[-1][0]  # non-heading inherits parent level
-        while len(stack) > 1 and stack[-1][0] >= level:
-            stack.pop()
-        stack[-1][1]["nodes"].append(node)
         if seg.level > 0:
-            stack.append((level, node))
+            # heading node: pop continuations (level=0) and same/deeper headings
+            while len(stack) > 1 and (stack[-1][0] == 0 or stack[-1][0] >= seg.level):
+                stack.pop()
+            stack[-1][1]["nodes"].append(node)
+            stack.append((seg.level, node))
+        else:
+            if stack[-1][0] == 0:
+                # previous was also a continuation — nest inside it
+                stack[-1][1]["nodes"].append(node)
+            else:
+                # first continuation after a heading — create a parent node from heading
+                title, _ = _extract_heading(node.get("content", ""))
+                if title:
+                    _, body = _extract_heading(node.get("content", ""))
+                    node["content"] = body
+                    parent_node: dict = {
+                        "id": node["id"] + "_group",
+                        "title": title,
+                        "location_type": node.get("location_type", "section"),
+                        "content": "",
+                        "bm25_doc_id": None,
+                        "nodes": [node],
+                    }
+                    stack[-1][1]["nodes"].append(parent_node)
+                    stack.append((0, parent_node))
+                else:
+                    stack[-1][1]["nodes"].append(node)
+                    stack.append((0, node))
 
+    _drop_redundant_titles(root)
     return root
+
+
+def _extract_heading(content: str) -> tuple[str, str]:
+    """Extract the first markdown heading from content, return (title, remaining_body)."""
+    lines = content.split("\n", 1)
+    first_line = lines[0].strip()
+    m = re.match(r"^#{1,3} (.+)", first_line)
+    if not m:
+        return "", content
+    title = m.group(1).strip()
+    body = lines[1].strip() if len(lines) > 1 else ""
+    return title, body
+
+
+def _drop_redundant_titles(node: dict) -> None:
+    """Remove title from heading leaf nodes — it's already the first line of content."""
+    for child in node.get("nodes", []):
+        _drop_redundant_titles(child)
+    if not node.get("nodes") and node.get("level", 0) > 0:
+        node.pop("title", None)
 
 
 def _seg_to_node(seg: Segment) -> dict:
@@ -110,7 +155,7 @@ def _flatten_index(index: dict, file_path: str) -> list[Segment]:
                 file_path=file_path,
                 content=node["content"],
                 location_type=node.get("location_type", "block"),
-                location_label=node["title"],
+                location_label=node.get("title") or node["content"].splitlines()[0].lstrip("#").strip()[:80],
                 location_index=index,
                 char_count=len(node["content"]),
                 bm25_doc_id=node.get("bm25_doc_id"),

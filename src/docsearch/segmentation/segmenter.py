@@ -203,11 +203,66 @@ def _segment_fallback(doc: ExtractedDoc) -> list[Segment]:
 # ------------------------------------------------------------------
 
 def _apply_size_limit(segments: list[Segment], max_chars: int) -> list[Segment]:
-    """Post-process segments: split any that exceed max_chars."""
+    """Post-process segments: split on internal headings first, then by size."""
     result: list[Segment] = []
     for seg in segments:
-        result.extend(_split_if_too_long(seg, max_chars))
+        for s in _split_on_internal_headings(seg):
+            result.extend(_split_if_too_long(s, max_chars))
     return result
+
+
+def _split_on_internal_headings(seg: Segment) -> list[Segment]:
+    """Split a segment on any internal markdown headings it contains.
+
+    Prevents nesting content from different sections under a single heading node.
+    Only applies to heading segments (level > 0).
+    """
+    if seg.level == 0:
+        return [seg]
+
+    parts = re.split(r"\n(?=#{1,3} )", seg.content)
+    if len(parts) <= 1:
+        return [seg]
+
+    result: list[Segment] = []
+    for i, part in enumerate(parts):
+        part = part.strip()
+        if not part:
+            continue
+        first_line = part.splitlines()[0]
+        m = re.match(r"^(#{1,3}) ", first_line)
+
+        if i == 0:
+            # Original segment — keep id and level, update content
+            result.append(Segment(
+                id=seg.id,
+                file_path=seg.file_path,
+                content=part,
+                location_type=seg.location_type,
+                location_label=seg.location_label,
+                location_index=seg.location_index,
+                char_count=len(part),
+                section_id=seg.section_id,
+                level=seg.level,
+            ))
+        elif m:
+            # Internal heading — new sibling segment with its own level
+            level = len(m.group(1))
+            title = first_line.lstrip("#").strip()[:80]
+            node_id = _segment_id(seg.file_path, title, seg.location_index * 1000 + i)
+            result.append(Segment(
+                id=node_id,
+                file_path=seg.file_path,
+                content=part,
+                location_type="section" if level <= 2 else "block",
+                location_label=title,
+                location_index=seg.location_index * 1000 + i,
+                char_count=len(part),
+                section_id=node_id,
+                level=level,
+            ))
+
+    return result if result else [seg]
 
 
 def _split_if_too_long(seg: Segment, max_chars: int) -> list[Segment]:
@@ -233,7 +288,7 @@ def _split_if_too_long(seg: Segment, max_chars: int) -> list[Segment]:
             location_index=sub_index,
             char_count=len(chunk),
             section_id=seg.section_id,
-            level=seg.level,
+            level=0,  # sub-segments are continuations, not new heading nodes
         ))
 
     # Guard: never drop a valid segment entirely
