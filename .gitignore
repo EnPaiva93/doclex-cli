@@ -10,3 +10,5 @@ ANDE Files/
 .claude/
 .agents/
 skills-lock.json
+benchmarks/data/
+benchmarks/results/

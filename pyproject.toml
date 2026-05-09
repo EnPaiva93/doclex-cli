@@ -21,6 +21,7 @@ docsearch = "docsearch.cli:app"
 dev = [
     "pytest",
     "pytest-asyncio",
+    "ranx",
 ]
 
 [tool.pytest.ini_options]
@@ -29,3 +30,9 @@ testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/docsearch"]
+
+[dependency-groups]
+dev = [
+    "ranx>=0.3.21",
+    "tqdm>=4.0",
+]
