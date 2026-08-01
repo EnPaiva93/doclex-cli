@@ -8,6 +8,12 @@ import pytest
 
 from docsearch.config import Config
 from docsearch.pipeline import Pipeline
+from docsearch.registry import ProjectRegistry
+
+
+@pytest.fixture(autouse=True)
+def _isolated_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOCSEARCH_REGISTRY_PATH", str(tmp_path / "registry.json"))
 
 
 @pytest.fixture()
@@ -66,3 +72,9 @@ async def pipeline(config: Config) -> Pipeline:
     await p.startup()
     yield p
     await p.shutdown()
+
+
+@pytest.fixture()
+def project_name(docs_dir: Path) -> str:
+    ProjectRegistry().add("proj", docs_dir)
+    return "proj"

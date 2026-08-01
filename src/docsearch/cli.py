@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 from pathlib import Path
 
 import typer
@@ -10,6 +12,14 @@ from rich.table import Table
 
 from docsearch.config import Config
 from docsearch.pipeline import Pipeline
+from docsearch.registry import (
+    Project,
+    ProjectAlreadyExistsError,
+    ProjectFolderNotFoundError,
+    ProjectNotFoundError,
+    ProjectOverlapError,
+    ProjectRegistry,
+)
 
 app = typer.Typer(
     name="docsearch",
@@ -18,20 +28,95 @@ app = typer.Typer(
 )
 console = Console(width=220)
 
+project_app = typer.Typer(
+    name="project",
+    add_completion=False,
+    help="Manage registered projects (named folders).",
+)
+app.add_typer(project_app, name="project")
 
-def _get_pipeline(folder: Path, *, create: bool = False) -> Pipeline:
-    import os
-    os.environ["DOCSEARCH_FOLDER"] = str(folder)
+
+def _resolve_project(name: str) -> Project:
+    try:
+        return ProjectRegistry().get(name)
+    except ProjectNotFoundError as exc:
+        console.print(
+            f"[red]Error:[/red] {exc}\n\n"
+            "Run [bold]docsearch project list[/bold] to see registered projects."
+        )
+        raise typer.Exit(1)
+
+
+def _build_pipeline(project: Project, *, create: bool = False) -> Pipeline:
+    os.environ["DOCSEARCH_FOLDER"] = str(project.folder)
     config = Config()
     if create:
         config.ensure_dirs()
     elif not config.cache_dir.exists():
         console.print(
-            f"[yellow]No index found for[/yellow] [bold]{folder}[/bold]. "
-            "Run [bold]docsearch index <folder>[/bold] first."
+            f"[yellow]No index found for project[/yellow] [bold]{project.name}[/bold] "
+            f"({project.folder}). Run [bold]docsearch index --project {project.name}[/bold] first."
         )
         raise typer.Exit(0)
     return Pipeline(config)
+
+
+# ------------------------------------------------------------------
+# project add / list / remove
+# ------------------------------------------------------------------
+
+@project_app.command("add")
+def project_add(
+    name: str = typer.Argument(..., help="Unique name for the project."),
+    folder: Path = typer.Argument(..., help="Folder to register."),
+) -> None:
+    """Register a folder under a project name.
+
+    \b
+    Examples:
+      docsearch project add docs ./docs
+    """
+    try:
+        project = ProjectRegistry().add(name, folder)
+    except (ProjectAlreadyExistsError, ProjectFolderNotFoundError, ProjectOverlapError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1)
+    console.print(f"[green]✓[/green] Registered project '{project.name}' → {project.folder}")
+
+
+@project_app.command("list")
+def project_list() -> None:
+    """List registered projects."""
+    projects = ProjectRegistry().list()
+    if not projects:
+        console.print(
+            "[yellow]No projects registered.[/yellow] "
+            "Use [bold]docsearch project add <name> <folder>[/bold]."
+        )
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Name")
+    table.add_column("Folder")
+    for p in projects:
+        table.add_row(p.name, str(p.folder))
+    console.print(table)
+
+
+@project_app.command("remove")
+def project_remove(
+    name: str = typer.Argument(..., help="Project name to remove."),
+) -> None:
+    """Remove a project and purge its cache/index data."""
+    try:
+        project = ProjectRegistry().remove(name)
+    except ProjectNotFoundError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1)
+
+    cache_dir = project.folder / ".docsearch"
+    shutil.rmtree(cache_dir, ignore_errors=True)
+    console.print(f"[green]✓[/green] Removed project '{name}' and its cache ({cache_dir}).")
 
 
 # ------------------------------------------------------------------
@@ -40,43 +125,46 @@ def _get_pipeline(folder: Path, *, create: bool = False) -> Pipeline:
 
 @app.command()
 def index(
-    folder: Path = typer.Option(
-        ..., "--folder", "-f", envvar="DOCSEARCH_FOLDER",
-        help="Root folder that owns the index.",
+    project: str = typer.Option(
+        ..., "--project", "-p",
+        help="Registered project name.",
     ),
     files: list[Path] | None = typer.Option(
-        None, "--files",
-        help="One or more specific files to (re)index. Must be inside --folder.",
+        None, "--file",
+        help="One or more specific files to (re)index. Must be inside the project's folder.",
     ),
     force: bool = typer.Option(
         False, "--force",
         help="Force re-extraction of every file, ignoring cached state.",
     ),
 ) -> None:
-    """Index a folder or re-index specific files.
+    """Index a project or re-index specific files.
 
     \b
     Examples:
-      docsearch index --folder ./docs                        # incremental scan
-      docsearch index --folder ./docs --force                # reindex everything
-      docsearch index --folder ./docs --files report.pdf     # reindex one file
-      docsearch index --folder ./docs --files a.pdf b.docx
+      docsearch index --project docs                        # incremental scan
+      docsearch index --project docs --force                # reindex everything
+      docsearch index --project docs --file report.pdf      # reindex one file
+      docsearch index --project docs --file a.pdf --file b.docx
     """
     if files and force:
-        console.print("[red]Error:[/red] --files and --force are mutually exclusive.")
+        console.print("[red]Error:[/red] --file and --force are mutually exclusive.")
         raise typer.Exit(1)
 
+    proj = _resolve_project(project)
+
     if files:
-        folder_resolved = folder.resolve()
         for f in files:
             if not f.exists():
                 console.print(f"[red]Error:[/red] File not found: {f}")
                 raise typer.Exit(1)
-            if not f.resolve().is_relative_to(folder_resolved):
-                console.print(f"[red]Error:[/red] {f} is not inside {folder}")
+            if not f.resolve().is_relative_to(proj.folder):
+                console.print(
+                    f"[red]Error:[/red] {f} is not inside project '{proj.name}' ({proj.folder})"
+                )
                 raise typer.Exit(1)
 
-    pipeline = _get_pipeline(folder, create=True)
+    pipeline = _build_pipeline(proj, create=True)
 
     async def run() -> None:
         await pipeline.startup()
@@ -157,7 +245,6 @@ def index(
     # ONNX Runtime (layout detection) crashes during Python interpreter shutdown
     # when the GC tries to free native session objects. os._exit bypasses GC
     # teardown; all work is already saved to disk.
-    import os
     os._exit(0)
 
 
@@ -167,11 +254,11 @@ def index(
 
 @app.command()
 def search(
-    folder: Path = typer.Option(
-        ..., "--folder", "-f", envvar="DOCSEARCH_FOLDER",
-        help="Root folder of the index to search.",
+    query: str = typer.Argument(..., help="Search query (natural language or keywords)."),
+    project: str = typer.Option(
+        ..., "--project", "-p",
+        help="Registered project name.",
     ),
-    query: str = typer.Option(..., "--query", "-q", help="Search query (natural language or keywords)."),
     top_k: int = typer.Option(10, "--top", "-k", help="Maximum number of results to return."),
     full: bool = typer.Option(
         False, "--full", "-F",
@@ -182,10 +269,11 @@ def search(
 
     \b
     Examples:
-      docsearch search --folder ./docs --query "GT/DPM"
-      docsearch search --folder ./docs --query "presupuesto 2024" --top 5 --full
+      docsearch search "GT/DPM" --project docs
+      docsearch search "presupuesto 2024" --project docs --top 5 --full
     """
-    pipeline = _get_pipeline(folder)
+    proj = _resolve_project(project)
+    pipeline = _build_pipeline(proj)
 
     async def run() -> None:
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
@@ -219,12 +307,12 @@ def search(
 
 @app.command()
 def status(
-    folder: Path = typer.Option(
-        ..., "--folder", "-f", envvar="DOCSEARCH_FOLDER",
-        help="Root folder of the index.",
+    project: str = typer.Option(
+        ..., "--project", "-p",
+        help="Registered project name.",
     ),
     files: list[Path] | None = typer.Option(
-        None, "--files",
+        None, "--file",
         help="Inspect one or more specific files.",
     ),
     list_all: bool = typer.Option(
@@ -240,12 +328,13 @@ def status(
 
     \b
     Examples:
-      docsearch status --folder ./docs                              # corpus summary
-      docsearch status --folder ./docs --list                       # list all files
-      docsearch status --folder ./docs --list --filter error        # filtered list
-      docsearch status --folder ./docs --files report.pdf r3.pdf   # inspect specific files
+      docsearch status --project docs                                   # corpus summary
+      docsearch status --project docs --list                            # list all files
+      docsearch status --project docs --list --filter error             # filtered list
+      docsearch status --project docs --file report.pdf --file r3.pdf   # inspect specific files
     """
-    pipeline = _get_pipeline(folder)
+    proj = _resolve_project(project)
+    pipeline = _build_pipeline(proj)
 
     async def run() -> None:
         await pipeline.startup()
@@ -254,7 +343,6 @@ def status(
         if files:
             for f in files:
                 info = await pipeline.get_file_status(f)
-
                 rec = info["record"]
                 console.print()
 
@@ -262,17 +350,17 @@ def status(
                 t.add_column(style="bold dim")
                 t.add_column()
                 t.add_row("File", str(f))
-            t.add_row("On disk", "[green]yes[/green]" if info["on_disk"] else "[red]no[/red]")
-            t.add_row("In index", "[green]yes[/green]" if info["in_index"] else "[yellow]no[/yellow]")
+                t.add_row("On disk", "[green]yes[/green]" if info["on_disk"] else "[red]no[/red]")
+                t.add_row("In index", "[green]yes[/green]" if info["in_index"] else "[yellow]no[/yellow]")
 
-            if rec:
-                modified_label = "[yellow]yes — run index to update[/yellow]" if info["is_modified"] else "[green]no[/green]"
-                t.add_row("Modified on disk", modified_label)
-                t.add_row("Status", rec.status)
-                t.add_row("MIME type", rec.mime_type)
-                t.add_row("Segments", str(len(info["segments"])))
-                if rec.error_msg:
-                    t.add_row("Error", f"[red]{rec.error_msg}[/red]")
+                if rec:
+                    modified_label = "[yellow]yes — run index to update[/yellow]" if info["is_modified"] else "[green]no[/green]"
+                    t.add_row("Modified on disk", modified_label)
+                    t.add_row("Status", rec.status)
+                    t.add_row("MIME type", rec.mime_type)
+                    t.add_row("Segments", str(len(info["segments"])))
+                    if rec.error_msg:
+                        t.add_row("Error", f"[red]{rec.error_msg}[/red]")
 
                 console.print(t)
 
@@ -326,7 +414,7 @@ def status(
         t.add_row("BM25 index", str(info["index_size"]) + " docs")
 
         if not info["has_index"]:
-            t.add_row("Disk state", "[yellow]not indexed — run docsearch index --folder <folder>[/yellow]")
+            t.add_row("Disk state", "[yellow]not indexed — run docsearch index --project <name>[/yellow]")
         else:
             pending_total = info["pending_new"] + info["pending_modified"] + info["pending_deleted"]
             if pending_total:
