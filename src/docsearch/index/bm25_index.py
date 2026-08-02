@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from bm25x import BM25
@@ -68,22 +69,39 @@ class BM25Index:
 
 
 def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> str:
-    """Extract a snippet of text around the first occurrence of any query term."""
-    lower = content.lower()
-    terms = query.lower().split()
-    pos = -1
+    """Extract a snippet of text around the first occurrence of any query term.
+
+    Query terms are split on non-alphanumeric characters (matching how BM25X
+    tokenizes documents, e.g. "GT/DPM" -> "gt", "dpm") instead of whitespace only,
+    so acronyms and punctuation-joined terms can still anchor the snippet. The
+    window is then snapped to word boundaries so it never cuts a word in half.
+    """
+    terms = [t for t in re.split(r"\W+", query.lower()) if t]
+
+    match = None
     for term in terms:
-        idx = lower.find(term)
-        if idx != -1:
-            pos = idx
+        m = re.search(re.escape(term), content, re.IGNORECASE)
+        if m:
+            match = m
             break
 
-    if pos == -1:
+    if match is None:
         return content[:window].rstrip() + ("…" if len(content) > window else "")
 
-    start = max(0, pos - window // 2)
-    end = min(len(content), pos + window // 2)
-    snippet = content[start:end].strip()
+    start = max(0, match.start() - window // 2)
+    end = min(len(content), match.end() + window // 2)
+    snippet = content[start:end]
+
+    if start > 0:
+        ws_positions = [p for p in (snippet.find(" "), snippet.find("\n"), snippet.find("\t")) if p != -1]
+        if ws_positions:
+            snippet = snippet[min(ws_positions) + 1 :]
+    if end < len(content):
+        last_ws = max(snippet.rfind(" "), snippet.rfind("\n"), snippet.rfind("\t"))
+        if last_ws > 0:
+            snippet = snippet[:last_ws]
+
+    snippet = snippet.strip() or content[start:end].strip()
     if start > 0:
         snippet = "…" + snippet
     if end < len(content):

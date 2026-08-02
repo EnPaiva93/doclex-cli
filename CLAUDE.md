@@ -299,13 +299,18 @@ Primera versión funcional con:
 * actualización incremental (Watchdog)
 * caché local y estado en SQLite
 
+La CLI se organiza alrededor de **proyectos**: un proyecto es un nombre registrado que apunta a una carpeta. Toda resolución de carpeta pasa por un proyecto registrado — no existe un flag `--folder` suelto. Esto evita ambigüedad sobre contra qué carpeta se opera y permite detectar carpetas solapadas entre proyectos (rechazadas al registrar).
+
 La CLI debe permitir al menos:
 
-* `docsearch index <carpeta>` — indexar o reindexar la carpeta
-* `docsearch search <query>` — buscar y mostrar resultados con citas
-* `docsearch list` — listar archivos indexados con su estado
-* `docsearch status` — mostrar estado del corpus
-* `docsearch reindex <archivo>` — forzar reindexación de un archivo específico sin necesidad de que Watchdog esté activo
+* `docsearch project add <nombre> <carpeta>` — registra una carpeta bajo un nombre de proyecto (rechaza nombres duplicados, carpetas inexistentes y carpetas que se solapen con un proyecto ya registrado)
+* `docsearch project list` — lista los proyectos registrados
+* `docsearch project remove <nombre>` — elimina un proyecto y purga siempre su caché e índice asociados
+* `docsearch index --project <nombre> [--file <archivo> ...] [--force]` — indexa el proyecto de forma incremental, o reindexa archivos puntuales con `--file` (repetible), o fuerza reextracción total con `--force`
+* `docsearch search <query> --project <nombre> [--top N] [--full]` — busca y muestra resultados con citas; `<query>` es un argumento posicional
+* `docsearch status --project <nombre> [--file <archivo> ...] [--list] [--filter indexed|error|pending]` — muestra estado del corpus, lista archivos indexados o inspecciona archivos específicos
+
+No existe un comando `docsearch list` ni `docsearch reindex` independientes: quedan cubiertos por `status --list` e `index --file` respectivamente.
 
 El resultado de `docsearch search` debe mostrar por cada resultado: archivo de origen, ubicación (página / hoja / sección), score de relevancia y snippet del texto encontrado.
 
