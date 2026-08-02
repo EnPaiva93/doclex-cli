@@ -20,8 +20,8 @@ A CLI that turns a local folder of documents into a searchable, citable corpus. 
 Requires Python ≥3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone <repo-url>
-cd doclex
+git clone https://github.com/EnPaiva93/doclex-cli.git
+cd doclex-cli
 uv sync
 ```
 

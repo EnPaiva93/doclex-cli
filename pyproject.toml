@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/EnPaiva93/doclex"
+Repository = "https://github.com/EnPaiva93/doclex-cli"
 
 [project.scripts]
 doclex = "doclex.cli:app"
