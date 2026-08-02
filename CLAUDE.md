@@ -2,7 +2,7 @@ Antes de escribir cualquier código, genera un plan de implementación completo 
 
 ---
 
-# DocSearch MCP
+# Doclex MCP
 
 Servidor MCP para búsqueda local dentro de documentos usando **extracción de texto + segmentación estructural + BM25**.
 
@@ -303,16 +303,16 @@ La CLI se organiza alrededor de **proyectos**: un proyecto es un nombre registra
 
 La CLI debe permitir al menos:
 
-* `docsearch project add <nombre> <carpeta>` — registra una carpeta bajo un nombre de proyecto (rechaza nombres duplicados, carpetas inexistentes y carpetas que se solapen con un proyecto ya registrado)
-* `docsearch project list` — lista los proyectos registrados
-* `docsearch project remove <nombre>` — elimina un proyecto y purga siempre su caché e índice asociados
-* `docsearch index --project <nombre> [--file <archivo> ...] [--force]` — indexa el proyecto de forma incremental, o reindexa archivos puntuales con `--file` (repetible), o fuerza reextracción total con `--force`
-* `docsearch search <query> --project <nombre> [--top N] [--full]` — busca y muestra resultados con citas; `<query>` es un argumento posicional
-* `docsearch status --project <nombre> [--file <archivo> ...] [--list] [--filter indexed|error|pending]` — muestra estado del corpus, lista archivos indexados o inspecciona archivos específicos
+* `doclex add <nombre> <carpeta>` — registra una carpeta bajo un nombre de proyecto (rechaza nombres duplicados, carpetas inexistentes y carpetas que se solapen con un proyecto ya registrado)
+* `doclex list` — lista los proyectos registrados
+* `doclex remove <nombre>` — elimina un proyecto y purga siempre su caché e índice asociados
+* `doclex index --project <nombre> [--file <archivo> ...] [--force]` — indexa el proyecto de forma incremental, o reindexa archivos puntuales con `--file` (repetible), o fuerza reextracción total con `--force`
+* `doclex search <query> --project <nombre> [--top N] [--full]` — busca y muestra resultados con citas; `<query>` es un argumento posicional
+* `doclex status --project <nombre> [--file <archivo> ...] [--all] [--filter indexed|error|pending]` — muestra estado del corpus, lista archivos indexados (`--all`) o inspecciona archivos específicos
 
-No existe un comando `docsearch list` ni `docsearch reindex` independientes: quedan cubiertos por `status --list` e `index --file` respectivamente.
+`add`/`list`/`remove` son comandos planos, no un subgrupo `project`, ya que `--project` ya se usa como flag en `index`/`search`/`status`. `doclex list` lista **proyectos**, no archivos — para listar archivos de un proyecto se usa `status --all`. No existe un comando `doclex reindex` independiente: queda cubierto por `index --file`.
 
-El resultado de `docsearch search` debe mostrar por cada resultado: archivo de origen, ubicación (página / hoja / sección), score de relevancia y snippet del texto encontrado.
+El resultado de `doclex search` debe mostrar por cada resultado: archivo de origen, ubicación (página / hoja / sección), score de relevancia y snippet del texto encontrado.
 
 ### Fase 2 — Servidor MCP
 
@@ -335,7 +335,7 @@ Posibles mejoras fuera del alcance actual:
 
 ## Resumen funcional
 
-DocSearch MCP debe convertir una carpeta local de documentos en un corpus buscable para agentes, con actualización automática, recuperación precisa y resultados citables.
+Doclex MCP debe convertir una carpeta local de documentos en un corpus buscable para agentes, con actualización automática, recuperación precisa y resultados citables.
 
 ---
 

@@ -1,5 +1,5 @@
 """
-BEIR benchmark for the docsearch retrieval pipeline.
+BEIR benchmark for the doclex retrieval pipeline.
 
 Exercises the real segmentation layer (segment()) + BM25X index.
 Extraction (Kreuzberg) is bypassed — BEIR docs are plain text.
@@ -33,8 +33,8 @@ from bm25x import BM25
 from ranx import Qrels, Run, evaluate
 from tqdm import tqdm
 
-from docsearch.metadata.models import ExtractedDoc, Segment
-from docsearch.segmentation.segmenter import segment
+from doclex.metadata.models import ExtractedDoc, Segment
+from doclex.segmentation.segmenter import segment
 
 # ------------------------------------------------------------------ #
 # Paths & constants
@@ -345,7 +345,7 @@ def _save(r: dict, label: str, dataset: str) -> None:
 # ------------------------------------------------------------------ #
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="BEIR benchmark for the docsearch pipeline")
+    p = argparse.ArgumentParser(description="BEIR benchmark for the doclex pipeline")
     p.add_argument("--dataset", default=DEFAULT_DATASET)
     p.add_argument("--label", default="run", help="e.g. baseline, v2_tree")
     p.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.registry import (
+from doclex.registry import (
     ProjectAlreadyExistsError,
     ProjectFolderNotFoundError,
     ProjectNotFoundError,
@@ -150,7 +150,7 @@ def test_registry_default_path_uses_env_var_override(tmp_path: Path, monkeypatch
     folder = tmp_path / "docs"
     folder.mkdir()
     target = tmp_path / "reg.json"
-    monkeypatch.setenv("DOCSEARCH_REGISTRY_PATH", str(target))
+    monkeypatch.setenv("DOCLEX_REGISTRY_PATH", str(target))
 
     ProjectRegistry().add("p", folder)
 

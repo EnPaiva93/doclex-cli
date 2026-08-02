@@ -5,7 +5,7 @@ from pathlib import Path
 from kreuzberg import ExtractionConfig, LayoutDetectionConfig, OutputFormat, ResultFormat, extract_file_sync
 from kreuzberg.exceptions import KreuzbergError
 
-from docsearch.metadata.models import ExtractedDoc
+from doclex.metadata.models import ExtractedDoc
 
 
 def extract(path: Path) -> ExtractedDoc:

@@ -1,4 +1,4 @@
-# Plan de Implementación — DocSearch CLI (Fase 1)
+# Plan de Implementación — Doclex CLI (Fase 1)
 
 ## Objetivo
 
@@ -14,7 +14,7 @@ SearchDocs/
 ├── .gitignore
 ├── PLAN.md
 ├── src/
-│   └── docsearch/
+│   └── doclex/
 │       ├── __init__.py
 │       ├── cli.py                  # Entry point CLI (Typer o argparse)
 │       ├── config.py               # Config via env vars
@@ -161,25 +161,25 @@ El índice BM25X se persiste en `.cache/bm25_index/` usando la persistencia nati
 
 | Variable               | Default                        |
 |------------------------|--------------------------------|
-| `DOCSEARCH_FOLDER`     | requerido                      |
-| `DOCSEARCH_CACHE_DIR`  | `{folder}/.docsearch`          |
-| `DOCSEARCH_DB_PATH`    | `{cache_dir}/docsearch.db`     |
-| `DOCSEARCH_TOP_K`      | `10`                           |
-| `DOCSEARCH_DEBOUNCE`   | `1.0` segundos                 |
+| `DOCLEX_FOLDER`     | requerido                      |
+| `DOCLEX_CACHE_DIR`  | `{folder}/.doclex`          |
+| `DOCLEX_DB_PATH`    | `{cache_dir}/doclex.db`     |
+| `DOCLEX_TOP_K`      | `10`                           |
+| `DOCLEX_DEBOUNCE`   | `1.0` segundos                 |
 
 ---
 
 ## Comandos CLI
 
 ```
-docsearch index <carpeta>       Indexar o reindexar la carpeta completa
-docsearch search <query>        Buscar en el corpus indexado
-docsearch list                  Listar archivos indexados con su estado
-docsearch status                Mostrar resumen del corpus (N archivos, N segmentos)
-docsearch reindex <archivo>     Forzar reindexación de un archivo específico
+doclex index <carpeta>       Indexar o reindexar la carpeta completa
+doclex search <query>        Buscar en el corpus indexado
+doclex list                  Listar archivos indexados con su estado
+doclex status                Mostrar resumen del corpus (N archivos, N segmentos)
+doclex reindex <archivo>     Forzar reindexación de un archivo específico
 ```
 
-### Output de `docsearch search`
+### Output de `doclex search`
 
 Por cada resultado:
 ```
@@ -189,7 +189,7 @@ Por cada resultado:
 
 ---
 
-## Flujo de inicialización / `docsearch index`
+## Flujo de inicialización / `doclex index`
 
 1. Leer config
 2. Inicializar SQLite (crear tablas si no existen)
@@ -198,7 +198,7 @@ Por cada resultado:
 5. Para cada cambio: extraer → segmentar → actualizar caché → actualizar SQLite → actualizar índice
 6. Guardar índice BM25X en disco
 
-## Flujo de `docsearch search`
+## Flujo de `doclex search`
 
 1. Recibir query
 2. Normalización básica (lowercase, strip)
@@ -207,7 +207,7 @@ Por cada resultado:
 5. Generar snippet
 6. Imprimir resultados formateados
 
-## Flujo de `docsearch reindex <archivo>`
+## Flujo de `doclex reindex <archivo>`
 
 1. Calcular hash y metadatos del archivo
 2. Eliminar segmentos del archivo en SQLite e índice BM25X
@@ -221,7 +221,7 @@ Por cada resultado:
 
 ```toml
 [project]
-name = "docsearch"
+name = "doclex"
 version = "0.1.0"
 requires-python = ">=3.11"
 
@@ -234,7 +234,7 @@ dependencies = [
 ]
 
 [project.scripts]
-docsearch = "docsearch.cli:app"
+doclex = "doclex.cli:app"
 ```
 
 ---

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.cache.store import CacheStore, _build_index, _flatten_index
-from docsearch.metadata.models import ExtractedDoc, Segment
+from doclex.cache.store import CacheStore, _build_index, _flatten_index
+from doclex.metadata.models import ExtractedDoc, Segment
 
 
 # ------------------------------------------------------------------

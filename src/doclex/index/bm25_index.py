@@ -5,7 +5,7 @@ from pathlib import Path
 
 from bm25x import BM25
 
-from docsearch.metadata.models import Segment
+from doclex.metadata.models import Segment
 
 
 _SNIPPET_WINDOW = 200  # chars around the query match for snippet generation

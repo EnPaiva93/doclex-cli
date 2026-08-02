@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.ingestion.scanner import file_hash, file_record_from_disk, reconcile
-from docsearch.metadata.db import Database
-from docsearch.metadata.models import FileRecord
+from doclex.ingestion.scanner import file_hash, file_record_from_disk, reconcile
+from doclex.metadata.db import Database
+from doclex.metadata.models import FileRecord
 
 
 # ------------------------------------------------------------------
@@ -165,12 +165,12 @@ async def test_reconcile_no_changes_when_file_unchanged(tmp_path: Path, db: Data
     assert changes.deleted == []
 
 
-async def test_reconcile_ignores_docsearch_dir(tmp_path: Path, db: Database) -> None:
+async def test_reconcile_ignores_doclex_dir(tmp_path: Path, db: Database) -> None:
     folder = tmp_path / "docs"
     folder.mkdir()
-    docsearch_dir = folder / ".docsearch"
-    docsearch_dir.mkdir()
-    (docsearch_dir / "internal.md").write_text("# Internal cache", encoding="utf-8")
+    doclex_dir = folder / ".doclex"
+    doclex_dir.mkdir()
+    (doclex_dir / "internal.md").write_text("# Internal cache", encoding="utf-8")
 
     changes = await reconcile(folder, db)
 

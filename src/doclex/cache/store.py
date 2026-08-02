@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from docsearch.metadata.models import ExtractedDoc, Segment
+from doclex.metadata.models import ExtractedDoc, Segment
 
 
 class CacheStore:

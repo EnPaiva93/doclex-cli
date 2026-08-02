@@ -7,7 +7,7 @@ from pathlib import Path
 from kreuzberg import ExtractionConfig, extract_file_sync
 from kreuzberg.exceptions import KreuzbergError
 
-from docsearch.metadata.models import ExtractedDoc, Segment
+from doclex.metadata.models import ExtractedDoc, Segment
 
 # Minimum chars for a segment to be worth indexing
 _MIN_CHARS = 30

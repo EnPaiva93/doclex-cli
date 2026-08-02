@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.metadata.db import Database
-from docsearch.metadata.models import FileRecord, Segment
+from doclex.metadata.db import Database
+from doclex.metadata.models import FileRecord, Segment
 
 
 # ------------------------------------------------------------------

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.index.bm25_index import BM25Index, make_snippet
-from docsearch.metadata.models import Segment
+from doclex.index.bm25_index import BM25Index, make_snippet
+from doclex.metadata.models import Segment
 
 
 def _make_segment(seg_id: str, content: str, index: int = 0) -> Segment:

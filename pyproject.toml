@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "docsearch"
+name = "doclex"
 version = "0.1.0"
 description = "Local document search — BM25 lexical search over PDFs, DOCX, XLSX, CSV, Markdown and TXT files. No embeddings, no vector DB, no cloud."
 readme = "README.md"
@@ -21,10 +21,10 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/EnPaiva93/docsearch"
+Repository = "https://github.com/EnPaiva93/doclex"
 
 [project.scripts]
-docsearch = "docsearch.cli:app"
+doclex = "doclex.cli:app"
 
 [project.optional-dependencies]
 dev = [
@@ -38,7 +38,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/docsearch"]
+packages = ["src/doclex"]
 
 [dependency-groups]
 dev = [

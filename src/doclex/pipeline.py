@@ -5,15 +5,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Awaitable
 
-from docsearch.cache.store import CacheStore
-from docsearch.config import Config
-from docsearch.extraction.extractor import ExtractionError, extract
-from docsearch.index.bm25_index import BM25Index, make_snippet
-from docsearch.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
-from docsearch.ingestion.watcher import FileWatcher
-from docsearch.metadata.db import Database
-from docsearch.metadata.models import FileRecord, SearchResult
-from docsearch.segmentation.segmenter import segment
+from doclex.cache.store import CacheStore
+from doclex.config import Config
+from doclex.extraction.extractor import ExtractionError, extract
+from doclex.index.bm25_index import BM25Index, make_snippet
+from doclex.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
+from doclex.ingestion.watcher import FileWatcher
+from doclex.metadata.db import Database
+from doclex.metadata.models import FileRecord, SearchResult
+from doclex.segmentation.segmenter import segment
 
 
 class Pipeline:

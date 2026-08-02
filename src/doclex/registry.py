@@ -38,10 +38,10 @@ class ProjectRegistry:
 
     @staticmethod
     def _default_path() -> Path:
-        env = os.environ.get("DOCSEARCH_REGISTRY_PATH")
+        env = os.environ.get("DOCLEX_REGISTRY_PATH")
         if env:
             return Path(env).expanduser().resolve()
-        return Path.home() / ".docsearch" / "projects.json"
+        return Path.home() / ".doclex" / "projects.json"
 
     def _load(self) -> dict[str, Project]:
         if not self._path.exists():

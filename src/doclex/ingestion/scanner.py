@@ -4,9 +4,9 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from docsearch.config import SUPPORTED_EXTENSIONS
-from docsearch.metadata.db import Database
-from docsearch.metadata.models import FileRecord
+from doclex.config import SUPPORTED_EXTENSIONS
+from doclex.metadata.db import Database
+from doclex.metadata.models import FileRecord
 
 
 @dataclass
@@ -42,8 +42,8 @@ async def reconcile(folder: Path, db: Database) -> ChangeSet:
     on_disk: dict[str, Path] = {}
     for path in folder.rglob("*"):
         if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            # Skip the .docsearch directory itself
-            if ".docsearch" in path.parts:
+            # Skip the .doclex directory itself
+            if ".doclex" in path.parts:
                 continue
             on_disk[str(path)] = path
 

@@ -10,9 +10,9 @@ from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from docsearch.config import Config
-from docsearch.pipeline import Pipeline
-from docsearch.registry import (
+from doclex.config import Config
+from doclex.pipeline import Pipeline
+from doclex.registry import (
     Project,
     ProjectAlreadyExistsError,
     ProjectFolderNotFoundError,
@@ -22,18 +22,11 @@ from docsearch.registry import (
 )
 
 app = typer.Typer(
-    name="docsearch",
+    name="doclex",
     add_completion=False,
     help="Local document search — BM25-based, no embeddings, no cloud.",
 )
 console = Console(width=220)
-
-project_app = typer.Typer(
-    name="project",
-    add_completion=False,
-    help="Manage registered projects (named folders).",
-)
-app.add_typer(project_app, name="project")
 
 
 def _resolve_project(name: str) -> Project:
@@ -42,31 +35,31 @@ def _resolve_project(name: str) -> Project:
     except ProjectNotFoundError as exc:
         console.print(
             f"[red]Error:[/red] {exc}\n\n"
-            "Run [bold]docsearch project list[/bold] to see registered projects."
+            "Run [bold]doclex list[/bold] to see registered projects."
         )
         raise typer.Exit(1)
 
 
 def _build_pipeline(project: Project, *, create: bool = False) -> Pipeline:
-    os.environ["DOCSEARCH_FOLDER"] = str(project.folder)
+    os.environ["DOCLEX_FOLDER"] = str(project.folder)
     config = Config()
     if create:
         config.ensure_dirs()
     elif not config.cache_dir.exists():
         console.print(
             f"[yellow]No index found for project[/yellow] [bold]{project.name}[/bold] "
-            f"({project.folder}). Run [bold]docsearch index --project {project.name}[/bold] first."
+            f"({project.folder}). Run [bold]doclex index --project {project.name}[/bold] first."
         )
         raise typer.Exit(0)
     return Pipeline(config)
 
 
 # ------------------------------------------------------------------
-# project add / list / remove
+# add / remove / projects
 # ------------------------------------------------------------------
 
-@project_app.command("add")
-def project_add(
+@app.command()
+def add(
     name: str = typer.Argument(..., help="Unique name for the project."),
     folder: Path = typer.Argument(..., help="Folder to register."),
 ) -> None:
@@ -74,7 +67,7 @@ def project_add(
 
     \b
     Examples:
-      docsearch project add docs ./docs
+      doclex add docs ./docs
     """
     try:
         project = ProjectRegistry().add(name, folder)
@@ -84,27 +77,27 @@ def project_add(
     console.print(f"[green]✓[/green] Registered project '{project.name}' → {project.folder}")
 
 
-@project_app.command("list")
-def project_list() -> None:
+@app.command("list")
+def list_projects() -> None:
     """List registered projects."""
-    projects = ProjectRegistry().list()
-    if not projects:
+    all_projects = ProjectRegistry().list()
+    if not all_projects:
         console.print(
             "[yellow]No projects registered.[/yellow] "
-            "Use [bold]docsearch project add <name> <folder>[/bold]."
+            "Use [bold]doclex add <name> <folder>[/bold]."
         )
         return
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("Name")
     table.add_column("Folder")
-    for p in projects:
+    for p in all_projects:
         table.add_row(p.name, str(p.folder))
     console.print(table)
 
 
-@project_app.command("remove")
-def project_remove(
+@app.command()
+def remove(
     name: str = typer.Argument(..., help="Project name to remove."),
 ) -> None:
     """Remove a project and purge its cache/index data."""
@@ -114,7 +107,7 @@ def project_remove(
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1)
 
-    cache_dir = project.folder / ".docsearch"
+    cache_dir = project.folder / ".doclex"
     shutil.rmtree(cache_dir, ignore_errors=True)
     console.print(f"[green]✓[/green] Removed project '{name}' and its cache ({cache_dir}).")
 
@@ -142,10 +135,10 @@ def index(
 
     \b
     Examples:
-      docsearch index --project docs                        # incremental scan
-      docsearch index --project docs --force                # reindex everything
-      docsearch index --project docs --file report.pdf      # reindex one file
-      docsearch index --project docs --file a.pdf --file b.docx
+      doclex index --project docs                        # incremental scan
+      doclex index --project docs --force                # reindex everything
+      doclex index --project docs --file report.pdf      # reindex one file
+      doclex index --project docs --file a.pdf --file b.docx
     """
     if files and force:
         console.print("[red]Error:[/red] --file and --force are mutually exclusive.")
@@ -269,8 +262,8 @@ def search(
 
     \b
     Examples:
-      docsearch search "GT/DPM" --project docs
-      docsearch search "presupuesto 2024" --project docs --top 5 --full
+      doclex search "GT/DPM" --project docs
+      doclex search "presupuesto 2024" --project docs --top 5 --full
     """
     proj = _resolve_project(project)
     pipeline = _build_pipeline(proj)
@@ -315,8 +308,8 @@ def status(
         None, "--file",
         help="Inspect one or more specific files.",
     ),
-    list_all: bool = typer.Option(
-        False, "--list",
+    all_files: bool = typer.Option(
+        False, "--all",
         help="List all indexed files with their status.",
     ),
     filter_status: str | None = typer.Option(
@@ -328,10 +321,10 @@ def status(
 
     \b
     Examples:
-      docsearch status --project docs                                   # corpus summary
-      docsearch status --project docs --list                            # list all files
-      docsearch status --project docs --list --filter error             # filtered list
-      docsearch status --project docs --file report.pdf --file r3.pdf   # inspect specific files
+      doclex status --project docs                                   # corpus summary
+      doclex status --project docs --all                             # list all files
+      doclex status --project docs --all --filter error              # filtered list
+      doclex status --project docs --file report.pdf --file r3.pdf   # inspect specific files
     """
     proj = _resolve_project(project)
     pipeline = _build_pipeline(proj)
@@ -368,7 +361,7 @@ def status(
             return
 
         # ── File list ────────────────────────────────────────────────
-        if list_all:
+        if all_files:
             file_list = await pipeline.list_files(filter_status)
             await pipeline.shutdown()
 
@@ -414,7 +407,7 @@ def status(
         t.add_row("BM25 index", str(info["index_size"]) + " docs")
 
         if not info["has_index"]:
-            t.add_row("Disk state", "[yellow]not indexed — run docsearch index --project <name>[/yellow]")
+            t.add_row("Disk state", "[yellow]not indexed — run doclex index --project <name>[/yellow]")
         else:
             pending_total = info["pending_new"] + info["pending_modified"] + info["pending_deleted"]
             if pending_total:
@@ -423,7 +416,7 @@ def status(
                     f"[yellow]{info['pending_new']} new  "
                     f"{info['pending_modified']} modified  "
                     f"{info['pending_deleted']} deleted[/yellow]"
-                    "  → run [bold]docsearch index[/bold]",
+                    "  → run [bold]doclex index[/bold]",
                 )
             else:
                 t.add_row("Disk state", "[green]up to date[/green]")

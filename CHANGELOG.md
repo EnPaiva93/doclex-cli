@@ -11,13 +11,13 @@ First release — CLI MVP (Fase 1): local, embeddings-free document search over 
 
 ### Added
 
-- Local document search CLI (`docsearch`) — BM25 lexical search, no embeddings, no vector DB, no cloud.
+- Local document search CLI (`doclex`) — BM25 lexical search, no embeddings, no vector DB, no cloud.
 - Ingestion pipeline: folder scanning with hash-based change detection, Kreuzberg-based text extraction, structural segmentation per file type (pages, sheets, sections, blocks), BM25X indexing, SQLite metadata store, and a local extraction cache.
 - Real-time incremental updates via Watchdog file monitoring, plus full reconciliation on startup.
-- `docsearch project add/list/remove` — named project registry mapping folder paths to project names, rejecting overlapping/nested folders.
-- `docsearch index --project <name> [--file ...] [--force]` — incremental or forced full reindexing, with per-file targeting.
-- `docsearch search <query> --project <name> [--top] [--full]` — top-k BM25 search with citations (file, location, score, snippet).
-- `docsearch status --project <name> [--file ...] [--list] [--filter]` — corpus/index status, file listing, and per-file inspection.
+- `doclex add`/`projects`/`remove` — named project registry mapping folder paths to project names, rejecting overlapping/nested folders.
+- `doclex index --project <name> [--file ...] [--force]` — incremental or forced full reindexing, with per-file targeting.
+- `doclex search <query> --project <name> [--top] [--full]` — top-k BM25 search with citations (file, location, score, snippet).
+- `doclex status --project <name> [--file ...] [--all] [--filter]` — corpus/index status, file listing, and per-file inspection.
 - OCR support (`--ocr`) for scanned PDFs, and layout-aware segmentation via Kreuzberg.
 - Recursive character-based splitter keeping segments within a 1024-character limit while preserving semantic boundaries.
 
@@ -25,7 +25,7 @@ First release — CLI MVP (Fase 1): local, embeddings-free document search over 
 
 - CLI output migrated to Rich (progress bars, tables) instead of plain text.
 - Segmentation cache replaced with a unified page-index-style tree; split sub-segments now nest under their extracted heading parent.
-- `list`/`reindex` merged into `index`/`status` flags; cache directory renamed from `.cache` to `.docsearch`.
+- `list`/`reindex` merged into `index`/`status` flags; cache directory renamed from `.cache` to `.doclex`.
 - Layout-aware PDF segmentation made the default (removed the `--precise` flag).
 
 ### Fixed

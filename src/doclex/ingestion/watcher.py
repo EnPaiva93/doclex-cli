@@ -8,7 +8,7 @@ from pathlib import Path
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from docsearch.config import SUPPORTED_EXTENSIONS
+from doclex.config import SUPPORTED_EXTENSIONS
 
 
 class _Handler(FileSystemEventHandler):
@@ -31,7 +31,7 @@ class _Handler(FileSystemEventHandler):
     def _schedule(self, path: str, event_type: str) -> None:
         if not self._is_supported(path):
             return
-        if ".docsearch" in Path(path).parts:
+        if ".doclex" in Path(path).parts:
             return
         with self._lock:
             if path in self._timers:

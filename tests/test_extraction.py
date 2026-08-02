@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.extraction.extractor import ExtractionError, extract
-from docsearch.metadata.models import ExtractedDoc
+from doclex.extraction.extractor import ExtractionError, extract
+from doclex.metadata.models import ExtractedDoc
 
 
 def test_extract_markdown(docs_dir: Path) -> None:

@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.config import Config
-from docsearch.pipeline import Pipeline
-from docsearch.registry import ProjectRegistry
+from doclex.config import Config
+from doclex.pipeline import Pipeline
+from doclex.registry import ProjectRegistry
 
 
 @pytest.fixture(autouse=True)
 def _isolated_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DOCSEARCH_REGISTRY_PATH", str(tmp_path / "registry.json"))
+    monkeypatch.setenv("DOCLEX_REGISTRY_PATH", str(tmp_path / "registry.json"))
 
 
 @pytest.fixture()
@@ -58,9 +58,9 @@ def docs_dir(tmp_path: Path) -> Path:
 @pytest.fixture()
 def config(docs_dir: Path, tmp_path: Path) -> Config:
     cache_dir = tmp_path / ".cache"
-    os.environ["DOCSEARCH_FOLDER"] = str(docs_dir)
-    os.environ["DOCSEARCH_CACHE_DIR"] = str(cache_dir)
-    os.environ["DOCSEARCH_DB_PATH"] = str(cache_dir / "docsearch.db")
+    os.environ["DOCLEX_FOLDER"] = str(docs_dir)
+    os.environ["DOCLEX_CACHE_DIR"] = str(cache_dir)
+    os.environ["DOCLEX_DB_PATH"] = str(cache_dir / "doclex.db")
     cfg = Config()
     cfg.ensure_dirs()
     return cfg

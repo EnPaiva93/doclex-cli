@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from docsearch.extraction.extractor import extract
-from docsearch.metadata.models import ExtractedDoc, Segment
-from docsearch.segmentation.segmenter import (
+from doclex.extraction.extractor import extract
+from doclex.metadata.models import ExtractedDoc, Segment
+from doclex.segmentation.segmenter import (
     _MAX_CHARS,
     _MIN_CHARS,
     _recursive_split,
