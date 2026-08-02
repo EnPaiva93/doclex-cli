@@ -1,12 +1,17 @@
-# Doclex
+<h1 align="center">Doclex</h1>
 
-*[English](README.md) · Español*
+<p align="center"><em><a href="README.md">English</a> · Español</em></p>
 
-Un CLI que convierte una carpeta local de documentos en un corpus buscable y citable. Apuntá a una carpeta; la extracción, segmentación, indexación y seguimiento de cambios ocurren automáticamente.
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="Licencia: MIT">
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+">
+</p>
+
+<p align="center">Un CLI que convierte una carpeta local de documentos en un corpus buscable y citable. Apuntá a una carpeta; la extracción, segmentación, indexación y seguimiento de cambios ocurren automáticamente.</p>
 
 ## Por qué
 
-[Kreuzberg](https://github.com/Goldziher/kreuzberg) extrae texto. BM25X indexa strings. Ninguno de los dos sabe qué es un "archivo", cuándo cambió, ni cómo convertir un match en una cita. Doclex es la capa de orquestación que los une para que nunca tengas que pensar en el pipeline vos mismo:
+Doclex es la capa de orquestación que los une para que nunca tengas que pensar en el pipeline vos mismo:
 
 - **Enchufar y listo** — apuntá a una carpeta. Extracción, segmentación estructural, indexación y seguimiento de cambios ocurren automáticamente; no hay ningún pipeline que armar.
 - **SQLite es la fuente de verdad** — el hash, mtime y estado de indexación de cada archivo viven en un solo lugar, así que Doclex siempre sabe exactamente qué cambió y reprocesa solo eso.

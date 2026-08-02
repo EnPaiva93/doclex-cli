@@ -1,12 +1,17 @@
-# Doclex
+<h1 align="center">Doclex</h1>
 
-*English · [Español](README.es.md)*
+<p align="center"><em>English · <a href="README.es.md">Español</a></em></p>
 
-A CLI that turns a local folder of documents into a searchable, citable corpus. Point it at a folder; extraction, segmentation, indexing, and change tracking happen automatically.
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+">
+</p>
+
+<p align="center">A CLI that turns a local folder of documents into a searchable, citable corpus. Point it at a folder; extraction, segmentation, indexing, and change tracking happen automatically.</p>
 
 ## Why
 
-[Kreuzberg](https://github.com/Goldziher/kreuzberg) extracts text. BM25X indexes strings. Neither knows what a "file" is, when it changed, or how to turn a match back into a citation. Doclex is the orchestration layer that ties them together so you never have to think about the pipeline yourself:
+Doclex is the orchestration layer that ties them together so you never have to think about the pipeline yourself:
 
 - **Plug and play** — point it at a folder. Extraction, structural segmentation, indexing, and change tracking all happen automatically; there's no pipeline to wire up.
 - **SQLite is the source of truth** — every file's hash, mtime, and indexing status live in one place, so Doclex always knows exactly what changed and reprocesses only that.
