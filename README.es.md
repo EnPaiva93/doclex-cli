@@ -9,7 +9,7 @@
 
 <p align="center">Un CLI que convierte una carpeta local de documentos en un corpus buscable y citable. Apuntá a una carpeta; la extracción, segmentación, indexación y seguimiento de cambios ocurren automáticamente.</p>
 
-## Por qué
+## Funcionalidades
 
 Doclex es la capa de orquestación que los une para que nunca tengas que pensar en el pipeline vos mismo:
 

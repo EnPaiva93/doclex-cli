@@ -9,7 +9,7 @@
 
 <p align="center">A CLI that turns a local folder of documents into a searchable, citable corpus. Point it at a folder; extraction, segmentation, indexing, and change tracking happen automatically.</p>
 
-## Why
+## Features
 
 Doclex is the orchestration layer that ties them together so you never have to think about the pipeline yourself:
 
