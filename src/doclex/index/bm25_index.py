@@ -69,27 +69,38 @@ class BM25Index:
 
 
 def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> str:
-    """Extract a snippet of text around the first occurrence of any query term.
+    """Extract a snippet centered on the window with the highest density of query-term matches.
 
     Query terms are split on non-alphanumeric characters (matching how BM25X
     tokenizes documents, e.g. "GT/DPM" -> "gt", "dpm") instead of whitespace only,
-    so acronyms and punctuation-joined terms can still anchor the snippet. The
-    window is then snapped to word boundaries so it never cuts a word in half.
+    so acronyms and punctuation-joined terms can still anchor the snippet. Among
+    all match positions, the one whose surrounding window covers the most distinct
+    query terms wins (ties broken by total match count, then earliest position) —
+    not just the first occurrence of the first term — so the snippet favors the
+    part of the segment where the query actually clusters. The window is then
+    snapped to word boundaries so it never cuts a word in half.
     """
     terms = [t for t in re.split(r"\W+", query.lower()) if t]
 
-    match = None
-    for term in terms:
-        m = re.search(re.escape(term), content, re.IGNORECASE)
-        if m:
-            match = m
-            break
+    matches: list[tuple[int, int, str]] = [
+        (m.start(), m.end(), term)
+        for term in terms
+        for m in re.finditer(re.escape(term), content, re.IGNORECASE)
+    ]
 
-    if match is None:
+    if not matches:
         return content[:window].rstrip() + ("…" if len(content) > window else "")
 
-    start = max(0, match.start() - window // 2)
-    end = min(len(content), match.end() + window // 2)
+    def density(match: tuple[int, int, str]) -> tuple[int, int, int]:
+        pos = match[0]
+        lo, hi = pos - window // 2, pos + window // 2
+        nearby = [t for s, _, t in matches if lo <= s <= hi]
+        return (len(set(nearby)), len(nearby), -pos)
+
+    match_start, match_end, _ = max(matches, key=density)
+
+    start = max(0, match_start - window // 2)
+    end = min(len(content), match_end + window // 2)
     snippet = content[start:end]
 
     if start > 0:

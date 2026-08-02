@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-08-02
+
+### Fixed
+
+- Search result snippets now anchor on the window with the highest density of query-term matches instead of the first occurrence of the first term, so the snippet favors where the query actually clusters rather than an early, isolated mention.
+
 ## [0.1.0] - 2026-08-02
 
 First release — CLI MVP (Fase 1): local, embeddings-free document search over PDF, DOCX, XLSX, CSV, Markdown and TXT files.

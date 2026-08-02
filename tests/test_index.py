@@ -116,3 +116,15 @@ def test_snippet_adds_ellipsis_when_truncated() -> None:
     content = "inicio " + ("x " * 200) + "término " + ("y " * 200) + "final"
     snippet = make_snippet(content, "término")
     assert "…" in snippet
+
+
+def test_snippet_anchors_on_densest_cluster_not_first_occurrence() -> None:
+    """An early, isolated mention of one query term must not win over a later
+    passage where multiple query terms cluster together."""
+    filler = "x " * 150
+    content = (
+        "vacaciones " + filler +  # isolated first hit for "vacaciones", far from the real match
+        "días de vacaciones anuales remuneradas para el personal permanente"
+    )
+    snippet = make_snippet(content, "días vacaciones", window=80)
+    assert "días de vacaciones anuales" in snippet
