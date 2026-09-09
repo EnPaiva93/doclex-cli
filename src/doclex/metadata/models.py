@@ -43,17 +43,6 @@ class Segment:
             self.char_count = len(self.content)
 
 
-@dataclass
-class SearchResult:
-    segment_id: str
-    score: float
-    file_path: str
-    mime_type: str
-    location_type: str
-    location_label: str
-    content: str
-    snippet: str  # ~200 chars alrededor del match
-
 
 @dataclass
 class Highlight:

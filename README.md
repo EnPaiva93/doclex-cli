@@ -44,12 +44,20 @@ uv run doclex search "quarterly budget" --project mydocs
 ```
 
 ```
-[1] budget_2024.pdf — page 3  (score: 4.812)
-    "...the quarterly budget was approved with a 12% increase in..."
+[1] budget_2024.pdf  4.812
+    finance/2024
+    Page 3
+    ...the quarterly budget was approved with a 12% increase in...
+    Page 11
+    ...budget variance is reviewed at the end of each quarter...
 
-[2] notes.md — Planning  (score: 2.107)
-    "...need to revisit the budget assumptions before..."
+[2] notes.md  2.107
+    planning
+    Planning
+    ...need to revisit the budget assumptions before...
 ```
+
+Results are **documents, not fragments**: a file that matches in twenty places is listed once, with its best passages beneath it. Use `--passages` to show more excerpts per document, and `--json` to get the same results with match offsets for your own highlighting.
 
 ## Walkthrough
 
@@ -71,11 +79,15 @@ Processing: 42 new, 0 modified, 0 deleted
 doclex search "termination clause" --project contracts
 ```
 ```
-[1] MSA_2023_AcmeCorp.pdf — Section 9.2  (score: 6.104)
-    "...either party may terminate this Agreement upon 30 days written notice..."
+[1] MSA_2023_AcmeCorp.pdf  6.104
+    vendors/acme
+    Section 9.2
+    ...either party may terminate this Agreement upon 30 days written notice...
 
-[2] vendor_agreement_v3.docx — Termination  (score: 5.887)
-    "...termination for convenience requires 60 days advance notice to..."
+[2] vendor_agreement_v3.docx  5.887
+    vendors
+    Termination
+    ...termination for convenience requires 60 days advance notice to...
 ```
 ```bash
 # 4. check what's indexed
@@ -136,7 +148,7 @@ doclex remove mydocs            # deregisters and purges its cache/index
 | `doclex list` | List registered projects |
 | `doclex remove <name>` | Remove a project and purge its cache/index |
 | `doclex index --project <name>` | Scan and index (incremental by default) |
-| `doclex search <query> --project <name>` | Search and print results with citations |
+| `doclex search <query> --project <name>` | Search and print matching documents with citations |
 | `doclex status --project <name>` | Show corpus/index status |
 
 Run `doclex <command> --help` for all flags and examples.
@@ -152,6 +164,12 @@ doclex index --project mydocs --file report.pdf --file notes.docx
 
 # more results, full segment text instead of a snippet
 doclex search "risk assessment" --project mydocs --top 20 --full
+
+# show up to three matching passages per document
+doclex search "risk assessment" --project mydocs --passages 3
+
+# machine-readable output, with match offsets for highlighting
+doclex search "risk assessment" --project mydocs --json
 
 # list every indexed file and its status
 doclex status --project mydocs --all --filter error
