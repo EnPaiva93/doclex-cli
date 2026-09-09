@@ -159,3 +159,18 @@ def test_snippet_highlights_are_ordered() -> None:
 
     starts = [h.start for h in snippet.highlights]
     assert starts == sorted(starts)
+
+
+def test_overlapping_matches_are_merged() -> None:
+    """Nested query terms must not produce overlapping ranges.
+
+    "ande" and "de" both match inside "ANDE"; overlapping ranges break any
+    consumer that wraps them, since the second wrap lands inside the first.
+    """
+    content = "El personal de la ANDE tiene vacaciones."
+    snippet = make_snippet(content, "de ande")
+
+    for previous, following in zip(snippet.highlights, snippet.highlights[1:]):
+        assert previous.end <= following.start
+
+    assert "ANDE" in [snippet.text[h.start:h.end] for h in snippet.highlights]

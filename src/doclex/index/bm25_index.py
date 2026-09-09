@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from bm25x import BM25
@@ -141,11 +142,26 @@ def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Sni
     suffix = "\u2026" if end < len(content) else ""
 
     # Offsets are relative to the excerpt, shifted by any leading ellipsis.
-    highlights = [
+    highlights = _merge(
         Highlight(start=s - start + len(prefix), end=e - start + len(prefix))
         for s, e, _ in matches
         if s >= start and e <= end
-    ]
-    highlights.sort(key=lambda h: h.start)
+    )
 
     return Snippet(text=prefix + snippet + suffix, highlights=highlights)
+
+
+def _merge(highlights: Iterable[Highlight]) -> list[Highlight]:
+    """Combine overlapping matches into single ranges, in order.
+
+    Query terms can nest — "ande" and "de" both match inside "ANDE" — and
+    overlapping ranges break any consumer that wraps them in markup, since the
+    second wrap lands inside the first one's tags.
+    """
+    merged: list[Highlight] = []
+    for h in sorted(highlights, key=lambda h: (h.start, h.end)):
+        if merged and h.start <= merged[-1].end:
+            merged[-1].end = max(merged[-1].end, h.end)
+        else:
+            merged.append(Highlight(start=h.start, end=h.end))
+    return merged
