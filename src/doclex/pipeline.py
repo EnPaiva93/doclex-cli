@@ -12,8 +12,25 @@ from doclex.index.bm25_index import BM25Index, make_snippet
 from doclex.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
 from doclex.ingestion.watcher import FileWatcher
 from doclex.metadata.db import Database
-from doclex.metadata.models import FileRecord, SearchResult
+from doclex.metadata.models import DocumentResult, FileRecord, PassageResult
 from doclex.segmentation.segmenter import segment
+
+
+# Passages fetched per requested document. Grouping collapses many passages into
+# one document, so the index must be asked for more candidates than final slots.
+_CANDIDATE_FACTOR = 5
+
+# Weight of each additional passage when scoring a document. The best passage
+# dominates; further matches add a little, rewarding coverage without letting
+# long documents win on volume alone.
+_PASSAGE_WEIGHTS = (1.0, 0.25, 0.10)
+
+
+def _document_score(passages: list[PassageResult]) -> float:
+    """Score a document from its passages, ranked best first."""
+    return sum(
+        p.score * w for p, w in zip(passages, _PASSAGE_WEIGHTS)
+    )
 
 
 class Pipeline:
@@ -141,42 +158,67 @@ class Pipeline:
         doc_ids = self._index.rebuild_from_segments(segments)
         await self._db.update_bm25_doc_ids(segments, doc_ids)
 
-    async def search(self, query: str, top_k: int | None = None) -> list[SearchResult]:
+    async def search(
+        self,
+        query: str,
+        top_k: int | None = None,
+        passages_per_document: int = 2,
+    ) -> list[DocumentResult]:
+        """Search the corpus and return ranked documents, best passages first.
+
+        Results are documents, not segments: a single file that matches in
+        twenty places is one result with its best passages attached, rather
+        than twenty rows crowding out every other document.
+        """
         k = top_k or self._config.top_k
         query = query.strip()
         if not query:
             return []
 
-        hits = self._index.search(query, k)
+        # Over-fetch passages so grouping still has enough distinct documents
+        # left after several passages collapse into the same file.
+        hits = self._index.search(query, k * _CANDIDATE_FACTOR)
         if not hits:
             return []
 
-        # Map bm25_doc_id → segment via DB
-        # We fetch all segments to build the id map (cheap, in-memory)
-        all_segments = await self._db.get_all_segments()
-        id_map: dict[int, object] = {
-            s.bm25_doc_id: s for s in all_segments if s.bm25_doc_id is not None
-        }
+        resolved = await self._db.get_segments_by_bm25_ids([doc_id for doc_id, _ in hits])
 
-        results: list[SearchResult] = []
+        by_file: dict[int, DocumentResult] = {}
         for doc_id, score in hits:
-            seg = id_map.get(doc_id)
-            if seg is None:
+            entry = resolved.get(doc_id)
+            if entry is None:
                 continue
-            file_rec = await self._db.get_file_by_path(seg.file_path)
-            results.append(
-                SearchResult(
+            seg, file_id, mime_type = entry
+
+            doc = by_file.get(file_id)
+            if doc is None:
+                doc = DocumentResult(
+                    file_id=file_id,
+                    file_path=seg.file_path,
+                    mime_type=mime_type,
+                    score=0.0,
+                )
+                by_file[file_id] = doc
+
+            doc.passages.append(
+                PassageResult(
                     segment_id=seg.id,
                     score=score,
-                    file_path=seg.file_path,
-                    mime_type=file_rec.mime_type if file_rec else "",
                     location_type=seg.location_type,
                     location_label=seg.location_label,
-                    content=seg.content,
+                    location_index=seg.location_index,
                     snippet=make_snippet(seg.content, query),
+                    content=seg.content,
                 )
             )
-        return results
+
+        for doc in by_file.values():
+            doc.passages.sort(key=lambda p: p.score, reverse=True)
+            doc.score = _document_score(doc.passages)
+            doc.passages = doc.passages[:passages_per_document]
+
+        ranked = sorted(by_file.values(), key=lambda d: d.score, reverse=True)
+        return ranked[:k]
 
     async def list_files(self, status: str | None = None) -> list[FileRecord]:
         files = await self._db.get_all_files()

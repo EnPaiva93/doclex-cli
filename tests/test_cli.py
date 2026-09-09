@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -221,7 +223,7 @@ def test_search_returns_results(docs_dir: Path, tmp_path: Path) -> None:
     result = runner.invoke(app, ["search", "BM25 indexación", "--project", "proj"], env=env)
     assert result.exit_code == 0
     assert "intro.md" in result.output
-    assert "score" in result.output
+    assert re.search(r"\d+\.\d{3}", result.output)  # document score
 
 
 def test_search_no_results(docs_dir: Path, tmp_path: Path) -> None:
@@ -327,3 +329,69 @@ def test_status_multiple_files_each_printed(docs_dir: Path, tmp_path: Path) -> N
     assert "intro.md" in result.output
     assert "notas.txt" in result.output
     assert result.output.count("On disk") == 2
+
+
+# ------------------------------------------------------------------
+# search — document grouping and JSON output
+# ------------------------------------------------------------------
+
+def test_search_lists_each_document_once(docs_dir: Path, tmp_path: Path) -> None:
+    """A file matching in several segments is one result, not several rows."""
+    env = _env(tmp_path)
+    _index(docs_dir, env)
+
+    result = runner.invoke(app, ["search", "BM25", "--project", "proj"], env=env)
+    assert result.exit_code == 0
+    assert result.output.count("intro.md") == 1
+
+
+def test_search_json_is_grouped_by_document(docs_dir: Path, tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    _index(docs_dir, env)
+
+    result = runner.invoke(
+        app, ["search", "BM25", "--project", "proj", "--json"], env=env
+    )
+    assert result.exit_code == 0
+
+    payload = json.loads(result.output)
+    assert payload["query"] == "BM25"
+    assert payload["total"] == len(payload["results"])
+
+    filenames = [doc["filename"] for doc in payload["results"]]
+    assert len(filenames) == len(set(filenames))
+
+    for doc in payload["results"]:
+        assert doc["passages"], "every document result carries its matching passages"
+        for passage in doc["passages"]:
+            snippet = passage["snippet"]
+            for h in passage["highlights"]:
+                assert snippet[h["start"]:h["end"]]
+
+
+def test_search_passages_flag_limits_passages_per_document(
+    docs_dir: Path, tmp_path: Path
+) -> None:
+    env = _env(tmp_path)
+    _index(docs_dir, env)
+
+    result = runner.invoke(
+        app,
+        ["search", "BM25", "--project", "proj", "--passages", "1", "--json"],
+        env=env,
+    )
+    assert result.exit_code == 0
+
+    payload = json.loads(result.output)
+    assert all(len(doc["passages"]) <= 1 for doc in payload["results"])
+
+
+def test_search_top_counts_documents_not_passages(docs_dir: Path, tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    _index(docs_dir, env)
+
+    result = runner.invoke(
+        app, ["search", "BM25", "--project", "proj", "--top", "1", "--json"], env=env
+    )
+    assert result.exit_code == 0
+    assert len(json.loads(result.output)["results"]) == 1

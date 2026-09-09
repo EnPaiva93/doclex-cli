@@ -206,6 +206,32 @@ class Database:
         )
         await self.conn.commit()
 
+    async def get_segments_by_bm25_ids(
+        self, doc_ids: list[int]
+    ) -> dict[int, tuple[Segment, int, str]]:
+        """Batch-resolve BM25 doc ids to segments, with owning file id and mime type.
+
+        One query for a whole result page — the search path must never load the
+        full corpus just to map ids back to segments.
+        """
+        if not doc_ids:
+            return {}
+        placeholders = ",".join("?" * len(doc_ids))
+        async with self.conn.execute(
+            f"""
+            SELECT s.*, f.path AS file_path, f.id AS owner_id, f.mime_type AS mime_type
+            FROM segments s
+            JOIN files f ON f.id = s.file_id
+            WHERE s.bm25_doc_id IN ({placeholders})
+            """,
+            doc_ids,
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {
+            r["bm25_doc_id"]: (_row_to_segment(r), r["owner_id"], r["mime_type"])
+            for r in rows
+        }
+
     async def get_all_segments(self) -> list[Segment]:
         """Used to rebuild the BM25 index on startup."""
         async with self.conn.execute(

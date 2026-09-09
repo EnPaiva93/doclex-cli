@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -252,27 +254,46 @@ def search(
         ..., "--project", "-p",
         help="Registered project name.",
     ),
-    top_k: int = typer.Option(10, "--top", "-k", help="Maximum number of results to return."),
+    top_k: int = typer.Option(10, "--top", "-k", help="Maximum number of documents to return."),
+    passages: int = typer.Option(
+        2, "--passages", "-P",
+        help="Maximum matching passages to show per document.",
+    ),
     full: bool = typer.Option(
         False, "--full", "-F",
         help="Show the full segment text instead of a short snippet.",
     ),
+    as_json: bool = typer.Option(
+        False, "--json",
+        help="Emit results as JSON instead of formatted text.",
+    ),
 ) -> None:
     """Search indexed documents and show results with citations.
+
+    Results are documents, not fragments: a file matching in many places is
+    listed once, with its best passages beneath it.
 
     \b
     Examples:
       doclex search "GT/DPM" --project docs
-      doclex search "presupuesto 2024" --project docs --top 5 --full
+      doclex search "presupuesto 2024" --project docs --top 5 --passages 3
+      doclex search "viaticos" --project docs --json
     """
     proj = _resolve_project(project)
     pipeline = _build_pipeline(proj)
 
     async def run() -> None:
-        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
-            spin.add_task("Searching…")
+        if as_json:
             await pipeline.startup()
-            results = await pipeline.search(query, top_k)
+            results = await pipeline.search(query, top_k, passages_per_document=passages)
+            await pipeline.shutdown()
+            print(json.dumps(_results_to_json(query, results, full), ensure_ascii=False, indent=2))
+            return
+
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
+            spin.add_task("Searching\u2026")
+            await pipeline.startup()
+            results = await pipeline.search(query, top_k, passages_per_document=passages)
             await pipeline.shutdown()
 
         if not results:
@@ -280,18 +301,109 @@ def search(
             return
 
         console.print()
-        for i, r in enumerate(results, 1):
-            file_name = Path(r.file_path).name
-            console.print(
-                f"[bold cyan][{i}][/bold cyan] [bold]{file_name}[/bold] — "
-                f"[dim]{r.location_label}[/dim]  "
-                f"[yellow](score: {r.score:.3f})[/yellow]"
-            )
-            text = r.content if full else r.snippet
-            console.print(f'    [italic]"{text}"[/italic]')
-            console.print()
+        for i, doc in enumerate(results, 1):
+            _print_document(i, doc, full, proj.folder)
 
     asyncio.run(run())
+
+
+def _print_document(rank: int, doc, full: bool, root: Path | None = None) -> None:
+    """Render one document result: title, path, then its matching passages."""
+    parent = _relative_parent(doc.file_path, root)
+    console.print(
+        f"[bold cyan][{rank}][/bold cyan] [bold]{doc.filename}[/bold]  "
+        f"[yellow]{doc.score:.3f}[/yellow]"
+    )
+    if parent:
+        console.print(f"    [dim]{parent}[/dim]")
+
+    for p in doc.passages:
+        location = _clean_label(p.location_label)
+        text = p.content if full else _clean_text(_highlight(p.snippet))
+        console.print(f"    [dim]{location}[/dim]")
+        # Heading-only segments repeat their label as their whole body; printing
+        # both just doubles the line.
+        if _strip_markup(text).strip() != location:
+            console.print(f"    {text}")
+    console.print()
+
+
+def _highlight(snippet) -> str:
+    """Render snippet highlights as Rich bold markup, back to front.
+
+    Walking in reverse keeps the remaining offsets valid as markup is spliced in.
+    """
+    text = snippet.text
+    for h in sorted(snippet.highlights, key=lambda h: h.start, reverse=True):
+        text = f"{text[:h.start]}[bold]{text[h.start:h.end]}[/bold]{text[h.end:]}"
+    return text
+
+
+def _relative_parent(file_path: str, root: Path | None) -> str:
+    """Show the folder relative to the project root — absolute paths bury the result."""
+    parent = Path(file_path).parent
+    if root:
+        try:
+            rel = parent.relative_to(root)
+        except ValueError:
+            return str(parent)
+        return str(rel) if str(rel) != "." else ""
+    return str(parent)
+
+
+def _strip_markup(text: str) -> str:
+    """Drop Rich markup so rendered text can be compared against plain strings."""
+    return re.sub(r"\[/?bold\]", "", text)
+
+
+def _clean_label(label: str) -> str:
+    """Turn an internal location label into a citation a reader can use.
+
+    Drops markdown carried over from extraction, and the trailing "> N" that the
+    size splitter appends: that number is the index of an internal chunk, not a
+    page or a section, so it means nothing to whoever reads the result.
+    """
+    label = re.sub(r"\s*\u203a\s*\d+\s*$", "", label)
+    label = label.replace("**", "").replace("#", "")
+    return " ".join(label.split())
+
+
+def _clean_text(text: str) -> str:
+    """Flatten a snippet for one-line display, without disturbing offsets."""
+    text = re.sub(r"(?:^|(?<=\s))#{1,6}\s*", "", text.replace("**", ""))
+    return " ".join(text.split())
+
+
+def _results_to_json(query: str, results: list, full: bool) -> dict:
+    return {
+        "query": query,
+        "total": len(results),
+        "results": [
+            {
+                "file_id": doc.file_id,
+                "filename": doc.filename,
+                "path": doc.file_path,
+                "mime_type": doc.mime_type,
+                "score": round(doc.score, 4),
+                "passages": [
+                    {
+                        "segment_id": p.segment_id,
+                        "score": round(p.score, 4),
+                        "location_type": p.location_type,
+                        "location_label": _clean_label(p.location_label),
+                        "location_index": p.location_index,
+                        "snippet": p.snippet.text,
+                        "highlights": [
+                            {"start": h.start, "end": h.end} for h in p.snippet.highlights
+                        ],
+                        **({"content": p.content} if full else {}),
+                    }
+                    for p in doc.passages
+                ],
+            }
+            for doc in results
+        ],
+    }
 
 
 # ------------------------------------------------------------------
