@@ -12,8 +12,10 @@ from doclex.metadata.models import ExtractedDoc, Segment
 # Minimum chars for a segment to be worth indexing
 _MIN_CHARS = 30
 
-# Maximum chars per segment — recursive splitter enforces this
-_MAX_CHARS = 1024
+# Safety valve, not a retrieval strategy: structural units (a page, a section)
+# are kept whole, and only something pathological — a multi-megabyte TXT with no
+# headings — gets split. PDF pages in practice top out around 4.5k chars.
+_MAX_CHARS = 8192
 
 # Headings: Markdown / plain text
 _HEADING_RE = re.compile(
@@ -52,15 +54,26 @@ def segment(doc: ExtractedDoc) -> list[Segment]:
 # ------------------------------------------------------------------
 
 def _segment_pdf(doc: ExtractedDoc) -> list[Segment]:
-    """Segment PDF: markdown-based when precise mode produced headings, otherwise page-based."""
-    segments: list[Segment] = []
+    """Segment a PDF by page, which is the unit a reader can actually cite.
 
-    if _has_markdown_headings(doc.text):
-        # precise mode: Kreuzberg returned markdown with heading structure
-        segments = _segment_text(doc)
+    The extractor's unified markdown carries no page boundaries, so pages come
+    from its per-page text instead. Pages are kept whole: on this corpus they
+    run ~2.4k chars and peak below 4.5k, well inside the safety limit.
+
+    Headings are deliberately not used to label pages. Layout detection emits
+    "#" for page footers and table column headers as readily as for real
+    sections, so a heading-derived label is as likely to cite "FIRMA DEL GERENTE
+    FINANCIERO" as anything meaningful. A bare page number is always true.
+    """
+    if doc.pages:
+        segments = [
+            _make_segment(doc, page.content, "page", f"Page {page.number}", page.number)
+            for page in doc.pages
+            if len(page.content.strip()) >= _MIN_CHARS
+        ]
     else:
-        pages = doc.text.split("\f")
-        segments = _make_segments(doc, pages, "page", "Page") if len(pages) > 1 else _segment_fallback(doc)
+        # No page information: fall back to the document's heading structure.
+        segments = _segment_text(doc)
 
     # Append table segments from precise mode (result.tables)
     if doc.tables:
@@ -72,10 +85,6 @@ def _segment_pdf(doc: ExtractedDoc) -> list[Segment]:
                 segments.append(_make_segment(doc, content, "table", label, offset + i))
 
     return segments or _segment_fallback(doc)
-
-
-def _has_markdown_headings(text: str) -> bool:
-    return bool(re.search(r"(?:^|\n)#{1,3} ", text))
 
 
 # ------------------------------------------------------------------

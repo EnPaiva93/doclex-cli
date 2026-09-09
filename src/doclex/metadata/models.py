@@ -17,12 +17,20 @@ class FileRecord:
 
 
 @dataclass
+class Page:
+    """One page of a paginated document, as reported by the extractor."""
+    number: int   # 1-based, as printed in the document
+    content: str
+
+
+@dataclass
 class ExtractedDoc:
     path: str
     text: str
     mime_type: str
     metadata: dict = field(default_factory=dict)
     tables: list = field(default_factory=list)      # kreuzberg extracted tables
+    pages: list[Page] = field(default_factory=list)  # empty for non-paginated formats
 
 
 @dataclass

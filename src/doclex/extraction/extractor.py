@@ -5,7 +5,7 @@ from pathlib import Path
 from kreuzberg import ExtractionConfig, LayoutDetectionConfig, OutputFormat, ResultFormat, extract_file_sync
 from kreuzberg.exceptions import KreuzbergError
 
-from doclex.metadata.models import ExtractedDoc
+from doclex.metadata.models import ExtractedDoc, Page
 
 
 def extract(path: Path) -> ExtractedDoc:
@@ -50,7 +50,26 @@ def extract(path: Path) -> ExtractedDoc:
         mime_type=result.mime_type or _mime_from_suffix(path),
         metadata=metadata,
         tables=tables,
+        pages=_pages(result),
     )
+
+
+def _pages(result: object) -> list[Page]:
+    """Collect per-page text, which is what lets a result cite a page number.
+
+    Kreuzberg reports pages separately from the unified content; the unified
+    markdown carries no page boundaries at all, so without this the page a
+    passage came from is unrecoverable.
+    """
+    raw = getattr(result, "pages", None) or []
+    pages: list[Page] = []
+    for i, page in enumerate(raw, 1):
+        if not isinstance(page, dict):
+            continue
+        content = page.get("content") or ""
+        if content.strip():
+            pages.append(Page(number=int(page.get("page_number") or i), content=content))
+    return pages
 
 
 def _mime_from_suffix(path: Path) -> str:
