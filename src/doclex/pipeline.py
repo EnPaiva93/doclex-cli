@@ -8,14 +8,12 @@ from typing import Awaitable
 
 from doclex.cache.store import CacheStore
 from doclex.config import Config
-from doclex.extraction.extractor import ExtractionError, extract
 from doclex.index.bm25_index import BM25Index, make_snippet, matched_terms, query_terms
-from doclex.index.title_index import TitleIndex
+from doclex.index.title_index import TitleIndex, fingerprint
 from doclex.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
 from doclex.ingestion.watcher import FileWatcher
 from doclex.metadata.db import Database
 from doclex.metadata.models import DocumentResult, FileRecord, PassageResult
-from doclex.segmentation.segmenter import segment
 
 
 # Passages fetched per requested document. Grouping collapses many passages into
@@ -98,7 +96,7 @@ class Pipeline:
         self._db = Database(config.db_path)
         self._cache = CacheStore(config.cache_dir)
         self._index = BM25Index(config.bm25_index_dir)
-        self._titles = TitleIndex()
+        self._titles = TitleIndex(config.title_index_dir)
         self._watcher: FileWatcher | None = None
 
     # ------------------------------------------------------------------
@@ -108,7 +106,7 @@ class Pipeline:
     async def startup(self) -> None:
         await self._db.connect()
         await self._load_or_rebuild_index()
-        self._titles.build(await self._db.get_all_files(), self._config.folder)
+        await self._load_or_rebuild_titles()
 
     async def shutdown(self) -> None:
         self._index.save()
@@ -128,6 +126,13 @@ class Pipeline:
     # ------------------------------------------------------------------
     # Reconciliation
     # ------------------------------------------------------------------
+
+    async def _load_or_rebuild_titles(self) -> None:
+        files = await self._db.get_all_files()
+        mark = fingerprint(files)
+        if not self._titles.load(mark):
+            self._titles.build(files, self._config.folder)
+            self._titles.save(mark)
 
     async def reconcile(self) -> ChangeSet:
         return await reconcile(self._config.folder, self._db)
@@ -153,11 +158,20 @@ class Pipeline:
                 on_progress(Path(path_str), "removing")
             await self._remove_file(path_str)
 
+        # Refresh here so the next search loads titles instead of rebuilding them.
+        await self._load_or_rebuild_titles()
+
     # ------------------------------------------------------------------
     # File processing
     # ------------------------------------------------------------------
 
     async def _process_file(self, path: Path) -> None:
+        # Imported here, not at module scope: extraction pulls in Kreuzberg and
+        # its layout stack (~420ms), which searching never needs and which the
+        # CLI would otherwise pay on every query.
+        from doclex.extraction.extractor import ExtractionError, extract
+        from doclex.segmentation.segmenter import segment
+
         record = file_record_from_disk(path)
         file_id = await self._db.upsert_file(record)
 
@@ -196,6 +210,7 @@ class Pipeline:
         await self._remove_file(str(path))
         await self._process_file(path)
         self._index.save()
+        await self._load_or_rebuild_titles()
 
     async def reindex_all(
         self,
@@ -216,6 +231,7 @@ class Pipeline:
         segments = await self._db.get_all_segments()
         doc_ids = self._index.rebuild_from_segments(segments)
         await self._db.update_bm25_doc_ids(segments, doc_ids)
+        await self._load_or_rebuild_titles()
 
     async def search(
         self,

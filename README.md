@@ -129,6 +129,21 @@ doclex index --project hr-policies
 doclex search "vacation days" --project hr-policies --top 5
 ```
 
+## Search latency
+
+`uv run` re-resolves the environment on every invocation, which costs about two
+seconds before Doclex runs at all. For searching, install the command once and
+call it directly:
+
+```bash
+uv tool install .
+doclex search "quarterly budget" --project mydocs
+```
+
+A search then costs roughly a second, most of it Python importing its own
+dependencies. Repeated searches inside one process — a future server or MCP
+frontend — cost about 70 ms.
+
 ## Projects
 
 Every command operates on a **registered project** — a name bound to a folder — instead of a raw `--folder` flag. This keeps folder resolution unambiguous and lets Doclex reject overlapping folders (a subfolder registered as its own project would silently duplicate indexing and caching):
