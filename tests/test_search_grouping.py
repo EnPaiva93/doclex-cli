@@ -4,7 +4,7 @@ from pathlib import Path
 
 from doclex.index.title_index import TitleIndex
 from doclex.metadata.models import FileRecord, PassageResult, Snippet
-from doclex.pipeline import _document_score
+from doclex.pipeline import _coverage, _document_score
 
 
 def _passage(score: float) -> PassageResult:
@@ -82,3 +82,44 @@ def test_title_index_is_empty_without_files() -> None:
     index.build([])
 
     assert index.search("cualquier cosa", 5) == {}
+
+
+# ------------------------------------------------------------------
+# Rarity-weighted query coverage
+# ------------------------------------------------------------------
+
+def _passage_with(content: str, score: float) -> PassageResult:
+    p = _passage(score)
+    p.content = content
+    return p
+
+
+def test_coverage_rewards_matching_the_rare_term() -> None:
+    """A page repeating a common word must not beat one holding the rare one."""
+    weights = {"gt": 3.2, "dpm": 5.9, "que": 0.7}
+
+    common = _coverage([_passage_with("GT/CAY y GT/CAY, que se aplica", 0)], weights)
+    rare = _coverage([_passage_with("GT/DPM Departamento de Protecciones", 0)], weights)
+
+    assert rare > common
+
+
+def test_coverage_is_complete_when_every_term_appears() -> None:
+    weights = {"vacaciones": 4.0, "dias": 2.0}
+    passage = _passage_with("Son 15 dias de vacaciones por año.", 0)
+
+    assert _coverage([passage], weights) == 1.0
+
+
+def test_coverage_uses_the_document_best_passage() -> None:
+    weights = {"gt": 3.2, "dpm": 5.9}
+    passages = [
+        _passage_with("Solo menciona GT aquí.", 0),
+        _passage_with("Aquí aparece GT/DPM completo.", 0),
+    ]
+
+    assert _coverage(passages, weights) == 1.0
+
+
+def test_coverage_without_usable_terms_does_not_penalise() -> None:
+    assert _coverage([_passage_with("cualquier texto", 0)], {}) == 1.0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Awaitable
@@ -8,7 +9,7 @@ from typing import Awaitable
 from doclex.cache.store import CacheStore
 from doclex.config import Config
 from doclex.extraction.extractor import ExtractionError, extract
-from doclex.index.bm25_index import BM25Index, make_snippet
+from doclex.index.bm25_index import BM25Index, make_snippet, matched_terms, query_terms
 from doclex.index.title_index import TitleIndex
 from doclex.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
 from doclex.ingestion.watcher import FileWatcher
@@ -38,6 +39,42 @@ def _document_score(passages: list[PassageResult]) -> float:
     return sum(
         p.score * w for p, w in zip(passages, _PASSAGE_WEIGHTS)
     )
+
+
+def _coverage(passages: list[PassageResult], weights: dict[str, float]) -> float:
+    """How much of the query's meaning the document's best passage carries.
+
+    BM25 sums term scores, so repeating one common word can outweigh matching a
+    rare one: for "gt/dpm", a page saying "GT/CAY" twenty times scored above the
+    two pages in the whole corpus containing "dpm". Counting plain term coverage
+    does not fix it — matching "que" then counts for as much as matching "dpm" —
+    so each term is weighted by how rare it is in this corpus.
+    """
+    total = sum(weights.values())
+    if not total:
+        return 1.0
+    covered = max(
+        (
+            sum(weights[t] for t in matched_terms(p.content, list(weights)))
+            for p in passages
+        ),
+        default=0.0,
+    )
+    return covered / total
+
+
+def _term_weights(index: BM25Index, terms: list[str]) -> dict[str, float]:
+    """Weight each query term by its rarity, dropping ones the corpus lacks."""
+    total_segments = len(index)
+    if not total_segments:
+        return {}
+
+    weights: dict[str, float] = {}
+    for term in terms:
+        df = index.document_frequency(term)
+        if df:
+            weights[term] = math.log(1 + total_segments / df)
+    return weights
 
 
 class Pipeline:
@@ -222,9 +259,10 @@ class Pipeline:
                 )
             )
 
+        weights = _term_weights(self._index, query_terms(query))
         for file_id, doc in by_file.items():
             doc.passages.sort(key=lambda p: p.score, reverse=True)
-            doc.score = _document_score(doc.passages)
+            doc.score = _document_score(doc.passages) * _coverage(doc.passages, weights)
             doc.score += _TITLE_WEIGHT * title_scores.get(file_id, 0.0)
             doc.passages = doc.passages[:passages_per_document]
 

@@ -62,6 +62,18 @@ class BM25Index:
         results = self._bm25.search(query, k)
         return [(doc_id, float(score)) for doc_id, score in results]
 
+    def document_frequency(self, term: str, cap: int = 1000) -> int:
+        """How many segments contain this term, counted up to `cap`.
+
+        Rarity is what separates a decisive query word from a filler one, and
+        the index is the only place that knows it. Capping keeps the cost flat
+        on large corpora: anything above the cap is common enough that the exact
+        figure changes nothing.
+        """
+        if self._index is None or len(self._bm25) == 0:
+            return 0
+        return len(self._bm25.search(term, min(cap, len(self._bm25))))
+
     def save(self) -> None:
         self._bm25.save(str(self._dir))
 
@@ -92,6 +104,11 @@ def _term_pattern(term: str) -> str:
     escaped = re.escape(term)
     suffix = r"\w*" if len(term) >= 5 else ""
     return rf"\b{escaped}{suffix}\b"
+
+
+def matched_terms(content: str, terms: list[str]) -> set[str]:
+    """Which of these query terms appear as words in the text."""
+    return {t for t in terms if re.search(_term_pattern(t), content, re.IGNORECASE)}
 
 
 def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Snippet:
