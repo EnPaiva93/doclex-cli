@@ -8,6 +8,11 @@ import aiosqlite
 
 from .models import FileRecord, Segment
 
+# Bumped whenever segmentation changes shape, since stored segments then no
+# longer match what the current code would produce. Version 2 moved PDFs from
+# 1024-character chunks to whole pages.
+INDEX_VERSION = 2
+
 if TYPE_CHECKING:
     pass
 
@@ -33,6 +38,11 @@ CREATE TABLE IF NOT EXISTS segments (
     location_index  INTEGER NOT NULL,
     char_count      INTEGER NOT NULL,
     bm25_doc_id     INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_path   ON files(path);
@@ -231,6 +241,27 @@ class Database:
             r["bm25_doc_id"]: (_row_to_segment(r), r["owner_id"], r["mime_type"])
             for r in rows
         }
+
+    async def index_version(self) -> int | None:
+        """Version of the segments already stored, or None for an empty corpus."""
+        async with self.conn.execute(
+            "SELECT value FROM meta WHERE key = 'index_version'"
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            return int(row["value"])
+        # A corpus indexed before versioning existed still holds v1 segments.
+        async with self.conn.execute("SELECT COUNT(*) AS n FROM segments") as cursor:
+            existing = await cursor.fetchone()
+        return 1 if existing and existing["n"] else None
+
+    async def set_index_version(self, version: int = INDEX_VERSION) -> None:
+        await self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES ('index_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(version),),
+        )
+        await self.conn.commit()
 
     async def get_char_counts_by_file(self) -> dict[int, int]:
         """Total extracted characters per file id, zero-filled for files with none."""

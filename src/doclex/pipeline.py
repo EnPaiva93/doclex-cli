@@ -12,7 +12,7 @@ from doclex.index.bm25_index import BM25Index, make_snippet, matched_terms, quer
 from doclex.index.title_index import TitleIndex, fingerprint
 from doclex.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
 from doclex.ingestion.watcher import FileWatcher
-from doclex.metadata.db import Database
+from doclex.metadata.db import INDEX_VERSION, Database
 from doclex.metadata.models import DocumentResult, FileRecord, PassageResult
 
 
@@ -160,6 +160,7 @@ class Pipeline:
 
         # Refresh here so the next search loads titles instead of rebuilding them.
         await self._load_or_rebuild_titles()
+        await self._db.set_index_version()
 
     # ------------------------------------------------------------------
     # File processing
@@ -232,6 +233,11 @@ class Pipeline:
         doc_ids = self._index.rebuild_from_segments(segments)
         await self._db.update_bm25_doc_ids(segments, doc_ids)
         await self._load_or_rebuild_titles()
+
+    async def index_is_outdated(self) -> bool:
+        """Whether stored segments predate the current segmentation."""
+        stored = await self._db.index_version()
+        return stored is not None and stored < INDEX_VERSION
 
     async def search(
         self,
@@ -340,6 +346,8 @@ class Pipeline:
             "pending_modified": len(changes.modified),
             "pending_deleted": len(changes.deleted),
             "has_index": has_index,
+            "index_version": await self._db.index_version(),
+            "current_index_version": INDEX_VERSION,
         }
 
     async def get_file_status(self, path: Path) -> dict:

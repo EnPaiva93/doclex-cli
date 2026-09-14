@@ -447,3 +447,25 @@ def test_status_reports_files_without_extractable_text(tmp_path: Path) -> None:
     assert listed.exit_code == 0
     assert "escaneado.txt" in listed.output
     assert "normal.md" not in listed.output
+
+
+def test_search_warns_when_the_index_predates_the_segmentation(
+    docs_dir: Path, tmp_path: Path
+) -> None:
+    """An index built by an older Doclex yields wrong citations; say so."""
+    env = _env(tmp_path)
+    _index(docs_dir, env)
+
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_path / ".cache" / "doclex.db")
+    conn.execute("UPDATE meta SET value = '1' WHERE key = 'index_version'")
+    conn.commit()
+    conn.close()
+
+    result = runner.invoke(app, ["search", "BM25", "--project", "proj"], env=env)
+    assert result.exit_code == 0
+    assert "outdated segments" in result.output
+
+    status = runner.invoke(app, ["status", "--project", "proj"], env=env)
+    assert "outdated" in status.output

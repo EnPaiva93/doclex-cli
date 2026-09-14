@@ -295,7 +295,16 @@ def search(
             spin.add_task("Searching\u2026")
             await pipeline.startup()
             results = await pipeline.search(query, top_k, passages_per_document=passages)
+            outdated = await pipeline.index_is_outdated()
             await pipeline.shutdown()
+
+        if outdated:
+            console.print(
+                "[yellow]Warning:[/yellow] this index was built by an older Doclex "
+                "and holds outdated segments.\n"
+                "Citations and ranking will be wrong until you run "
+                "[bold]doclex index --project <name> --force[/bold].\n"
+            )
 
         if not results:
             console.print("[yellow]No results found.[/yellow]")
@@ -540,6 +549,14 @@ def status(
             )
         t.add_row("Segments", str(info["segments_total"]))
         t.add_row("BM25 index", str(info["index_size"]) + " docs")
+
+        if info["index_version"] and info["index_version"] < info["current_index_version"]:
+            t.add_row(
+                "Index format",
+                f"[yellow]v{info['index_version']}, outdated (current v"
+                f"{info['current_index_version']})[/yellow] → run "
+                "[bold]doclex index --force[/bold]",
+            )
 
         if not info["has_index"]:
             t.add_row("Disk state", "[yellow]not indexed — run doclex index --project <name>[/yellow]")
