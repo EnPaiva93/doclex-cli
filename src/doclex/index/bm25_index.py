@@ -78,6 +78,22 @@ def query_terms(query: str) -> list[str]:
     return [t for t in re.split(r"\W+", query.lower()) if t]
 
 
+def _term_pattern(term: str) -> str:
+    """Match a query term as a word, not as a substring.
+
+    Matching anywhere let "me" land inside "conforme", which is not what the
+    index matched — BM25X tokenizes into words and drops "me" as a stopword —
+    and worse, those false hits steered which passage got shown.
+
+    Words of five characters or more may carry a suffix, so a stemmed index
+    match like "vacacion" against "vacaciones" still highlights. Shorter terms
+    must match exactly: allowing "me" to open "mensual" rebuilds the same bug.
+    """
+    escaped = re.escape(term)
+    suffix = r"\w*" if len(term) >= 5 else ""
+    return rf"\b{escaped}{suffix}\b"
+
+
 def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Snippet:
     """Extract the window with the highest density of query-term matches.
 
@@ -96,7 +112,7 @@ def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Sni
     matches: list[tuple[int, int, str]] = [
         (m.start(), m.end(), term)
         for term in terms
-        for m in re.finditer(re.escape(term), content, re.IGNORECASE)
+        for m in re.finditer(_term_pattern(term), content, re.IGNORECASE)
     ]
 
     if not matches:

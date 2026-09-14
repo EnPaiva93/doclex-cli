@@ -174,3 +174,32 @@ def test_overlapping_matches_are_merged() -> None:
         assert previous.end <= following.start
 
     assert "ANDE" in [snippet.text[h.start:h.end] for h in snippet.highlights]
+
+
+# ------------------------------------------------------------------
+# Query terms match words, not substrings
+# ------------------------------------------------------------------
+
+def test_short_term_does_not_match_inside_a_word() -> None:
+    """"me" must not match inside "conforme" — the index never matched it either."""
+    content = "Conforme al plan aprobado, el pago se realiza mensualmente sin excepción."
+    snippet = make_snippet(content, "me")
+
+    assert snippet.highlights == []
+
+
+def test_long_term_still_matches_its_inflections() -> None:
+    """A stemmed index hit like "vacacion" against "vacaciones" stays highlighted."""
+    content = "El funcionario goza de vacaciones anuales remuneradas cada año."
+    snippet = make_snippet(content, "vacacion")
+
+    assert [snippet.text[h.start:h.end] for h in snippet.highlights] == ["vacaciones"]
+
+
+def test_substring_matches_do_not_steer_snippet_selection() -> None:
+    """False hits used to win the density contest and show the wrong passage."""
+    decoy = "Conforme a lo dispuesto, conforme al plan, conforme al reglamento. " * 3
+    answer = "Corresponden 15 días hábiles de vacaciones por año de antigüedad."
+    snippet = make_snippet(decoy + answer, "me vacaciones", window=100)
+
+    assert "15 días hábiles de vacaciones" in snippet.text
