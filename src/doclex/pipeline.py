@@ -33,6 +33,19 @@ _PASSAGE_WEIGHTS = (1.0, 0.25, 0.10)
 # set conservatively rather than tuned — it wants a relevance set to pin down.
 _TITLE_WEIGHT = 1.5
 
+# Characters of extracted text per KB of file below which a document is treated
+# as having no usable text. Scanned pages yield almost nothing — three files in
+# the reference corpus sit at 0.14 to 0.22, while the next lowest real document
+# is at 3.3 and the median is 91 — so the gap this sits in is a wide one.
+_NO_TEXT_DENSITY = 1.0
+
+
+def _lacks_text(record: FileRecord, chars: int) -> bool:
+    """Whether a file's extracted text is too thin for its size to be real content."""
+    if record.status != "indexed" or record.size <= 0:
+        return False
+    return chars / (record.size / 1024) < _NO_TEXT_DENSITY
+
 
 def _document_score(passages: list[PassageResult]) -> float:
     """Score a document from its passages, ranked best first."""
@@ -271,13 +284,28 @@ class Pipeline:
 
     async def list_files(self, status: str | None = None) -> list[FileRecord]:
         files = await self._db.get_all_files()
+        if status == "no-text":
+            return await self.files_without_text()
         if status:
             files = [f for f in files if f.status == status]
         return files
 
+    async def files_without_text(self) -> list[FileRecord]:
+        """Files that indexed cleanly but yielded no searchable text.
+
+        A scanned PDF extracts to a handful of characters, so it is indexed,
+        reported as healthy, and can never be found — the failure mode a reader
+        cannot diagnose. Density is measured against file size rather than page
+        count, which the corpus does not record.
+        """
+        files = await self._db.get_all_files()
+        chars = await self._db.get_char_counts_by_file()
+        return [f for f in files if _lacks_text(f, chars.get(f.id or -1, 0))]
+
     async def corpus_status(self) -> dict:
         files = await self._db.get_all_files()
         segments = await self._db.get_all_segments()
+        char_counts = await self._db.get_char_counts_by_file()
         # Only reconcile if there's already an index — avoids scanning large filesystems
         has_index = len(files) > 0
         changes = await reconcile(self._config.folder, self._db) if has_index else ChangeSet(new=[], modified=[], deleted=[])
@@ -287,6 +315,9 @@ class Pipeline:
             "files_indexed": sum(1 for f in files if f.status == "indexed"),
             "files_error": sum(1 for f in files if f.status == "error"),
             "files_pending": sum(1 for f in files if f.status == "pending"),
+            "files_no_text": sum(
+                1 for f in files if _lacks_text(f, char_counts.get(f.id or -1, 0))
+            ),
             "segments_total": len(segments),
             "index_size": len(self._index),
             "pending_new": len(changes.new),
@@ -308,6 +339,7 @@ class Pipeline:
         if record and record.id is not None:
             segments = await self._db.get_segments_for_file(record.id)
 
+        chars = sum(s.char_count for s in segments)
         return {
             "path": str(path),
             "on_disk": on_disk,
@@ -315,6 +347,8 @@ class Pipeline:
             "is_modified": is_modified,
             "record": record,
             "segments": segments,
+            "chars": chars,
+            "lacks_text": bool(record) and _lacks_text(record, chars),
         }
 
     # ------------------------------------------------------------------

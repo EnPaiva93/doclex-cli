@@ -232,6 +232,19 @@ class Database:
             for r in rows
         }
 
+    async def get_char_counts_by_file(self) -> dict[int, int]:
+        """Total extracted characters per file id, zero-filled for files with none."""
+        async with self.conn.execute(
+            """
+            SELECT f.id AS file_id, COALESCE(SUM(s.char_count), 0) AS chars
+            FROM files f
+            LEFT JOIN segments s ON s.file_id = f.id
+            GROUP BY f.id
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {r["file_id"]: r["chars"] for r in rows}
+
     async def get_all_segments(self) -> list[Segment]:
         """Used to rebuild the BM25 index on startup."""
         async with self.conn.execute(
