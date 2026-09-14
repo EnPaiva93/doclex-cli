@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from bm25x import BM25
@@ -61,6 +62,18 @@ class BM25Index:
         results = self._bm25.search(query, k)
         return [(doc_id, float(score)) for doc_id, score in results]
 
+    def document_frequency(self, term: str, cap: int = 1000) -> int:
+        """How many segments contain this term, counted up to `cap`.
+
+        Rarity is what separates a decisive query word from a filler one, and
+        the index is the only place that knows it. Capping keeps the cost flat
+        on large corpora: anything above the cap is common enough that the exact
+        figure changes nothing.
+        """
+        if self._index is None or len(self._bm25) == 0:
+            return 0
+        return len(self._bm25.search(term, min(cap, len(self._bm25))))
+
     def save(self) -> None:
         self._bm25.save(str(self._dir))
 
@@ -75,6 +88,27 @@ def query_terms(query: str) -> list[str]:
     punctuation-joined terms usable as anchors, e.g. "GT/DPM" -> ["gt", "dpm"].
     """
     return [t for t in re.split(r"\W+", query.lower()) if t]
+
+
+def _term_pattern(term: str) -> str:
+    """Match a query term as a word, not as a substring.
+
+    Matching anywhere let "me" land inside "conforme", which is not what the
+    index matched — BM25X tokenizes into words and drops "me" as a stopword —
+    and worse, those false hits steered which passage got shown.
+
+    Words of five characters or more may carry a suffix, so a stemmed index
+    match like "vacacion" against "vacaciones" still highlights. Shorter terms
+    must match exactly: allowing "me" to open "mensual" rebuilds the same bug.
+    """
+    escaped = re.escape(term)
+    suffix = r"\w*" if len(term) >= 5 else ""
+    return rf"\b{escaped}{suffix}\b"
+
+
+def matched_terms(content: str, terms: list[str]) -> set[str]:
+    """Which of these query terms appear as words in the text."""
+    return {t for t in terms if re.search(_term_pattern(t), content, re.IGNORECASE)}
 
 
 def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Snippet:
@@ -95,7 +129,7 @@ def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Sni
     matches: list[tuple[int, int, str]] = [
         (m.start(), m.end(), term)
         for term in terms
-        for m in re.finditer(re.escape(term), content, re.IGNORECASE)
+        for m in re.finditer(_term_pattern(term), content, re.IGNORECASE)
     ]
 
     if not matches:
@@ -141,11 +175,26 @@ def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Sni
     suffix = "\u2026" if end < len(content) else ""
 
     # Offsets are relative to the excerpt, shifted by any leading ellipsis.
-    highlights = [
+    highlights = _merge(
         Highlight(start=s - start + len(prefix), end=e - start + len(prefix))
         for s, e, _ in matches
         if s >= start and e <= end
-    ]
-    highlights.sort(key=lambda h: h.start)
+    )
 
     return Snippet(text=prefix + snippet + suffix, highlights=highlights)
+
+
+def _merge(highlights: Iterable[Highlight]) -> list[Highlight]:
+    """Combine overlapping matches into single ranges, in order.
+
+    Query terms can nest — "ande" and "de" both match inside "ANDE" — and
+    overlapping ranges break any consumer that wraps them in markup, since the
+    second wrap lands inside the first one's tags.
+    """
+    merged: list[Highlight] = []
+    for h in sorted(highlights, key=lambda h: (h.start, h.end)):
+        if merged and h.start <= merged[-1].end:
+            merged[-1].end = max(merged[-1].end, h.end)
+        else:
+            merged.append(Highlight(start=h.start, end=h.end))
+    return merged

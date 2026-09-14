@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Awaitable
@@ -8,7 +9,8 @@ from typing import Awaitable
 from doclex.cache.store import CacheStore
 from doclex.config import Config
 from doclex.extraction.extractor import ExtractionError, extract
-from doclex.index.bm25_index import BM25Index, make_snippet
+from doclex.index.bm25_index import BM25Index, make_snippet, matched_terms, query_terms
+from doclex.index.title_index import TitleIndex
 from doclex.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
 from doclex.ingestion.watcher import FileWatcher
 from doclex.metadata.db import Database
@@ -25,12 +27,54 @@ _CANDIDATE_FACTOR = 5
 # long documents win on volume alone.
 _PASSAGE_WEIGHTS = (1.0, 0.25, 0.10)
 
+# How much a file-name match counts next to a body match. Body evidence still
+# leads; the title breaks ties between documents that quote the same words.
+# Sweeping 0.5 to 4.0 over the sample queries moved no top result, so this is
+# set conservatively rather than tuned — it wants a relevance set to pin down.
+_TITLE_WEIGHT = 1.5
+
 
 def _document_score(passages: list[PassageResult]) -> float:
     """Score a document from its passages, ranked best first."""
     return sum(
         p.score * w for p, w in zip(passages, _PASSAGE_WEIGHTS)
     )
+
+
+def _coverage(passages: list[PassageResult], weights: dict[str, float]) -> float:
+    """How much of the query's meaning the document's best passage carries.
+
+    BM25 sums term scores, so repeating one common word can outweigh matching a
+    rare one: for "gt/dpm", a page saying "GT/CAY" twenty times scored above the
+    two pages in the whole corpus containing "dpm". Counting plain term coverage
+    does not fix it — matching "que" then counts for as much as matching "dpm" —
+    so each term is weighted by how rare it is in this corpus.
+    """
+    total = sum(weights.values())
+    if not total:
+        return 1.0
+    covered = max(
+        (
+            sum(weights[t] for t in matched_terms(p.content, list(weights)))
+            for p in passages
+        ),
+        default=0.0,
+    )
+    return covered / total
+
+
+def _term_weights(index: BM25Index, terms: list[str]) -> dict[str, float]:
+    """Weight each query term by its rarity, dropping ones the corpus lacks."""
+    total_segments = len(index)
+    if not total_segments:
+        return {}
+
+    weights: dict[str, float] = {}
+    for term in terms:
+        df = index.document_frequency(term)
+        if df:
+            weights[term] = math.log(1 + total_segments / df)
+    return weights
 
 
 class Pipeline:
@@ -41,6 +85,7 @@ class Pipeline:
         self._db = Database(config.db_path)
         self._cache = CacheStore(config.cache_dir)
         self._index = BM25Index(config.bm25_index_dir)
+        self._titles = TitleIndex()
         self._watcher: FileWatcher | None = None
 
     # ------------------------------------------------------------------
@@ -50,6 +95,7 @@ class Pipeline:
     async def startup(self) -> None:
         await self._db.connect()
         await self._load_or_rebuild_index()
+        self._titles.build(await self._db.get_all_files(), self._config.folder)
 
     async def shutdown(self) -> None:
         self._index.save()
@@ -178,6 +224,7 @@ class Pipeline:
         # Over-fetch passages so grouping still has enough distinct documents
         # left after several passages collapse into the same file.
         hits = self._index.search(query, k * _CANDIDATE_FACTOR)
+        title_scores = self._titles.search(query, k * _CANDIDATE_FACTOR)
         if not hits:
             return []
 
@@ -212,9 +259,11 @@ class Pipeline:
                 )
             )
 
-        for doc in by_file.values():
+        weights = _term_weights(self._index, query_terms(query))
+        for file_id, doc in by_file.items():
             doc.passages.sort(key=lambda p: p.score, reverse=True)
-            doc.score = _document_score(doc.passages)
+            doc.score = _document_score(doc.passages) * _coverage(doc.passages, weights)
+            doc.score += _TITLE_WEIGHT * title_scores.get(file_id, 0.0)
             doc.passages = doc.passages[:passages_per_document]
 
         ranked = sorted(by_file.values(), key=lambda d: d.score, reverse=True)

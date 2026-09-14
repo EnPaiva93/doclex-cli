@@ -395,3 +395,32 @@ def test_search_top_counts_documents_not_passages(docs_dir: Path, tmp_path: Path
     )
     assert result.exit_code == 0
     assert len(json.loads(result.output)["results"]) == 1
+
+
+def test_search_survives_terms_nested_in_each_other(docs_dir: Path, tmp_path: Path) -> None:
+    """Overlapping matches used to splice broken markup and crash the renderer."""
+    env = _env(tmp_path)
+    _index(docs_dir, env)
+
+    result = runner.invoke(
+        app,
+        ["search", "indexación de la documentación con index", "--project", "proj"],
+        env=env,
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_search_renders_text_containing_brackets(tmp_path: Path) -> None:
+    """Square brackets in a document must not be parsed as console markup."""
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    (folder / "nota.md").write_text(
+        "# Nota\n\nEl artículo [30] fija el plazo de vacaciones anuales del personal.\n" * 3,
+        encoding="utf-8",
+    )
+    env = _env(tmp_path)
+    _index(folder, env)
+
+    result = runner.invoke(app, ["search", "vacaciones", "--project", "proj"], env=env)
+    assert result.exit_code == 0, result.output
+    assert "[30]" in result.output

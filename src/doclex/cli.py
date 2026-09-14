@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
@@ -311,16 +312,16 @@ def _print_document(rank: int, doc, full: bool, root: Path | None = None) -> Non
     """Render one document result: title, path, then its matching passages."""
     parent = _relative_parent(doc.file_path, root)
     console.print(
-        f"[bold cyan][{rank}][/bold cyan] [bold]{doc.filename}[/bold]  "
+        f"[bold cyan][{rank}][/bold cyan] [bold]{escape(doc.filename)}[/bold]  "
         f"[yellow]{doc.score:.3f}[/yellow]"
     )
     if parent:
-        console.print(f"    [dim]{parent}[/dim]")
+        console.print(f"    [dim]{escape(parent)}[/dim]")
 
     for p in doc.passages:
         location = _clean_label(p.location_label)
-        text = p.content if full else _clean_text(_highlight(p.snippet))
-        console.print(f"    [dim]{location}[/dim]")
+        text = escape(p.content) if full else _clean_text(_highlight(p.snippet))
+        console.print(f"    [dim]{escape(location)}[/dim]")
         # Heading-only segments repeat their label as their whole body; printing
         # both just doubles the line.
         if _strip_markup(text).strip() != location:
@@ -329,14 +330,19 @@ def _print_document(rank: int, doc, full: bool, root: Path | None = None) -> Non
 
 
 def _highlight(snippet) -> str:
-    """Render snippet highlights as Rich bold markup, back to front.
+    """Render snippet highlights as Rich bold markup.
 
-    Walking in reverse keeps the remaining offsets valid as markup is spliced in.
+    Document text is escaped before any markup is added: a passage containing
+    "[algo]" would otherwise be parsed as a tag and either vanish or raise.
     """
-    text = snippet.text
-    for h in sorted(snippet.highlights, key=lambda h: h.start, reverse=True):
-        text = f"{text[:h.start]}[bold]{text[h.start:h.end]}[/bold]{text[h.end:]}"
-    return text
+    out: list[str] = []
+    cursor = 0
+    for h in snippet.highlights:
+        out.append(escape(snippet.text[cursor:h.start]))
+        out.append(f"[bold]{escape(snippet.text[h.start:h.end])}[/bold]")
+        cursor = h.end
+    out.append(escape(snippet.text[cursor:]))
+    return "".join(out)
 
 
 def _relative_parent(file_path: str, root: Path | None) -> str:

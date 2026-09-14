@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from doclex.extraction.extractor import extract
-from doclex.metadata.models import ExtractedDoc, Segment
+from doclex.metadata.models import ExtractedDoc, Page, Segment
 from doclex.segmentation.segmenter import (
     _MAX_CHARS,
     _MIN_CHARS,
@@ -155,7 +155,7 @@ def test_split_if_too_long_returns_original_when_small() -> None:
 
 
 def test_split_if_too_long_label_suffix() -> None:
-    content = ("Este es un párrafo largo. " * 60).strip()  # ~1500 chars
+    content = ("Este es un párrafo largo. " * 400).strip()  # ~10k chars, past the safety limit
     seg = _make_segment("id1", content, label="# Introducción", index=0)
     result = _split_if_too_long(seg, _MAX_CHARS)
 
@@ -166,7 +166,7 @@ def test_split_if_too_long_label_suffix() -> None:
 
 
 def test_split_if_too_long_all_chunks_within_limit() -> None:
-    content = ("palabra " * 300).strip()  # ~2400 chars
+    content = ("palabra " * 2000).strip()  # ~16k chars, past the safety limit
     seg = _make_segment("id1", content, label="Document", index=0)
     result = _split_if_too_long(seg, _MAX_CHARS)
 
@@ -220,3 +220,83 @@ def test_segment_id_uniqueness_after_split() -> None:
 
     ids = [s.id for s in segments]
     assert len(ids) == len(set(ids)), "Sub-segment IDs must be unique after recursive split"
+
+
+# ------------------------------------------------------------------
+# PDF — page is the citable unit
+# ------------------------------------------------------------------
+
+def _pdf_doc(pages: list[str], text: str = "") -> ExtractedDoc:
+    return ExtractedDoc(
+        path="/docs/manual.pdf",
+        text=text,
+        mime_type="application/pdf",
+        metadata={},
+        pages=[Page(number=i, content=c) for i, c in enumerate(pages, 1)],
+    )
+
+
+def test_pdf_segments_one_per_page() -> None:
+    doc = _pdf_doc([f"Contenido de la página {i}. " * 20 for i in range(1, 6)])
+
+    segments = segment(doc)
+
+    assert len(segments) == 5
+    assert [s.location_label for s in segments] == [f"Page {i}" for i in range(1, 6)]
+    assert all(s.location_type == "page" for s in segments)
+
+
+def test_pdf_page_index_is_the_printed_page_number() -> None:
+    doc = _pdf_doc(["Primera página. " * 10, "Segunda página. " * 10])
+
+    segments = segment(doc)
+
+    assert [s.location_index for s in segments] == [1, 2]
+
+
+def test_pdf_page_is_not_split_below_the_safety_limit() -> None:
+    """A dense page stays one citable unit instead of becoming numbered chunks."""
+    page = "Texto denso de una página real. " * 120  # ~3.8k chars, like the corpus
+    doc = _pdf_doc([page])
+
+    segments = segment(doc)
+
+    assert len(segments) == 1
+    assert "\u203a" not in segments[0].location_label
+
+
+def test_pdf_skips_pages_without_extractable_text() -> None:
+    """Scanned pages come back empty; they must not become empty segments."""
+    doc = _pdf_doc(["Página con texto. " * 20, "   ", "Otra con texto. " * 20])
+
+    segments = segment(doc)
+
+    assert [s.location_label for s in segments] == ["Page 1", "Page 3"]
+
+
+def test_pdf_without_page_information_falls_back_to_headings() -> None:
+    doc = ExtractedDoc(
+        path="/docs/sin-paginas.pdf",
+        text="# Introducción\n\n" + ("Texto de la introducción. " * 10)
+             + "\n\n## Detalle\n\n" + ("Texto del detalle. " * 10),
+        mime_type="application/pdf",
+        metadata={},
+        pages=[],
+    )
+
+    segments = segment(doc)
+
+    assert segments
+    assert all(s.location_type != "page" for s in segments)
+
+
+def test_structural_units_survive_intact() -> None:
+    """Sections are indexed whole; only pathological input hits the splitter."""
+    section = "Contenido de la sección. " * 100  # ~2.5k chars
+    doc = _make_doc("/docs/manual.md", f"# Vacaciones\n\n{section}", "text/markdown")
+
+    segments = segment(doc)
+
+    assert len(segments) == 1
+    assert segments[0].char_count > _MIN_CHARS * 10
+    assert "\u203a" not in segments[0].location_label
