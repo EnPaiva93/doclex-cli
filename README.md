@@ -173,6 +173,9 @@ doclex search "risk assessment" --project mydocs --json
 
 # list every indexed file and its status
 doclex status --project mydocs --all --filter error
+
+# find scanned PDFs: they index cleanly but hold no searchable text
+doclex status --project mydocs --all --filter no-text
 ```
 
 ## Architecture

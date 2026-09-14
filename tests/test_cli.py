@@ -424,3 +424,26 @@ def test_search_renders_text_containing_brackets(tmp_path: Path) -> None:
     result = runner.invoke(app, ["search", "vacaciones", "--project", "proj"], env=env)
     assert result.exit_code == 0, result.output
     assert "[30]" in result.output
+
+
+def test_status_reports_files_without_extractable_text(tmp_path: Path) -> None:
+    """A scanned PDF indexes cleanly and can never be found; status must say so."""
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    # A large file whose extracted text is a few characters, like a scan.
+    (folder / "escaneado.txt").write_text("Anexo 1.\n" + "\x00" * 200_000, encoding="utf-8")
+    (folder / "normal.md").write_text("# Nota\n\n" + ("Texto real del documento. " * 200), encoding="utf-8")
+
+    env = _env(tmp_path)
+    _index(folder, env)
+
+    summary = runner.invoke(app, ["status", "--project", "proj"], env=env)
+    assert summary.exit_code == 0
+    assert "No text" in summary.output
+
+    listed = runner.invoke(
+        app, ["status", "--project", "proj", "--all", "--filter", "no-text"], env=env
+    )
+    assert listed.exit_code == 0
+    assert "escaneado.txt" in listed.output
+    assert "normal.md" not in listed.output

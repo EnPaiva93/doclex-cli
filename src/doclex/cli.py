@@ -432,7 +432,7 @@ def status(
     ),
     filter_status: str | None = typer.Option(
         None, "--filter",
-        help="Filter file list by status: indexed | error | pending.",
+        help="Filter file list by status: indexed | error | pending | no-text.",
     ),
 ) -> None:
     """Show corpus status, optionally listing files or inspecting specific files.
@@ -442,6 +442,7 @@ def status(
       doclex status --project docs                                   # corpus summary
       doclex status --project docs --all                             # list all files
       doclex status --project docs --all --filter error              # filtered list
+      doclex status --project docs --all --filter no-text            # scanned / empty PDFs
       doclex status --project docs --file report.pdf --file r3.pdf   # inspect specific files
     """
     proj = _resolve_project(project)
@@ -470,6 +471,12 @@ def status(
                     t.add_row("Status", rec.status)
                     t.add_row("MIME type", rec.mime_type)
                     t.add_row("Segments", str(len(info["segments"])))
+                    t.add_row("Extracted text", f"{info['chars']} chars")
+                    if info["lacks_text"]:
+                        t.add_row(
+                            "Searchable",
+                            "[yellow]no — almost no text extracted, likely a scan[/yellow]",
+                        )
                     if rec.error_msg:
                         t.add_row("Error", f"[red]{rec.error_msg}[/red]")
 
@@ -481,6 +488,7 @@ def status(
         # ── File list ────────────────────────────────────────────────
         if all_files:
             file_list = await pipeline.list_files(filter_status)
+            no_text_paths = {f.path for f in await pipeline.files_without_text()}
             await pipeline.shutdown()
 
             if not file_list:
@@ -498,9 +506,12 @@ def status(
             for f in file_list:
                 color = style_map.get(f.status, "white")
                 icon = icon_map.get(f.status, "?")
+                label = f.status
+                if f.path in no_text_paths:
+                    color, icon, label = "yellow", "⚠", "no text"
                 table.add_row(
-                    f"[{color}]{icon} {f.status}[/{color}]",
-                    f.path,
+                    f"[{color}]{icon} {label}[/{color}]",
+                    escape(f.path),
                     f.mime_type,
                 )
             console.print(table)
@@ -521,6 +532,12 @@ def status(
             + (f"  [red]{info['files_error']} errors[/red]" if info["files_error"] else "")
             + (f"  [yellow]{info['files_pending']} pending[/yellow]" if info["files_pending"] else ""),
         )
+        if info["files_no_text"]:
+            t.add_row(
+                "No text",
+                f"[yellow]{info['files_no_text']} files[/yellow] — likely scanned, "
+                "not searchable  → [bold]doclex status --all --filter no-text[/bold]",
+            )
         t.add_row("Segments", str(info["segments_total"]))
         t.add_row("BM25 index", str(info["index_size"]) + " docs")
 
