@@ -103,19 +103,20 @@ def test_persist_and_reload(tmp_path: Path) -> None:
 def test_snippet_contains_query_term() -> None:
     content = "El sistema usa BM25 para indexación léxica sin embeddings."
     snippet = make_snippet(content, "BM25")
-    assert "BM25" in snippet
+    assert "BM25" in snippet.text
 
 
 def test_snippet_truncates_long_content() -> None:
     content = "a" * 1000
     snippet = make_snippet(content, "zzz")  # term not found
-    assert len(snippet) <= 210  # window + ellipsis
+    assert len(snippet.text) <= 210  # window + ellipsis
+    assert snippet.highlights == []
 
 
 def test_snippet_adds_ellipsis_when_truncated() -> None:
     content = "inicio " + ("x " * 200) + "término " + ("y " * 200) + "final"
     snippet = make_snippet(content, "término")
-    assert "…" in snippet
+    assert "…" in snippet.text
 
 
 def test_snippet_anchors_on_densest_cluster_not_first_occurrence() -> None:
@@ -127,4 +128,34 @@ def test_snippet_anchors_on_densest_cluster_not_first_occurrence() -> None:
         "días de vacaciones anuales remuneradas para el personal permanente"
     )
     snippet = make_snippet(content, "días vacaciones", window=80)
-    assert "días de vacaciones anuales" in snippet
+    assert "días de vacaciones anuales" in snippet.text
+
+
+# ------------------------------------------------------------------
+# Snippet highlights
+# ------------------------------------------------------------------
+
+def test_snippet_highlights_point_at_query_terms() -> None:
+    """Offsets must address the query terms inside the snippet's own text."""
+    content = "El plazo de pago al proveedor es de 30 días desde la factura."
+    snippet = make_snippet(content, "plazo proveedor")
+
+    matched = [snippet.text[h.start:h.end].lower() for h in snippet.highlights]
+    assert matched == ["plazo", "proveedor"]
+
+
+def test_snippet_highlights_survive_leading_ellipsis() -> None:
+    """A truncated snippet shifts its text by one ellipsis; offsets must follow."""
+    content = ("relleno " * 60) + "el plazo de pago acordado" + (" relleno" * 60)
+    snippet = make_snippet(content, "plazo pago", window=60)
+
+    assert snippet.text.startswith("…")
+    assert [snippet.text[h.start:h.end] for h in snippet.highlights] == ["plazo", "pago"]
+
+
+def test_snippet_highlights_are_ordered() -> None:
+    content = "alpha beta gamma alpha delta alpha"
+    snippet = make_snippet(content, "alpha")
+
+    starts = [h.start for h in snippet.highlights]
+    assert starts == sorted(starts)

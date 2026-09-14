@@ -43,13 +43,50 @@ class Segment:
             self.char_count = len(self.content)
 
 
+
 @dataclass
-class SearchResult:
+class Highlight:
+    """Offsets of a query-term match inside a Snippet's text."""
+    start: int
+    end: int
+
+
+@dataclass
+class Snippet:
+    """A short excerpt of a segment, with the query matches located in it.
+
+    Highlights are offsets into `text`, not markup, so each frontend decides
+    how to render them (bold in the CLI, <mark> on the web, raw in JSON).
+    """
+    text: str
+    highlights: list[Highlight] = field(default_factory=list)
+
+    def __str__(self) -> str:
+        return self.text
+
+
+@dataclass
+class PassageResult:
+    """One matching location inside a document."""
     segment_id: str
     score: float
-    file_path: str
-    mime_type: str
     location_type: str
     location_label: str
+    location_index: int
+    snippet: Snippet
     content: str
-    snippet: str  # ~200 chars alrededor del match
+
+
+@dataclass
+class DocumentResult:
+    """A search result as the user sees it: one document, its best passages."""
+    file_id: int
+    file_path: str
+    mime_type: str
+    score: float
+    passages: list[PassageResult] = field(default_factory=list)
+
+    @property
+    def filename(self) -> str:
+        from pathlib import PurePath
+        return PurePath(self.file_path).name

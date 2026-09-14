@@ -5,7 +5,7 @@ from pathlib import Path
 
 from bm25x import BM25
 
-from doclex.metadata.models import Segment
+from doclex.metadata.models import Highlight, Segment, Snippet
 
 
 _SNIPPET_WINDOW = 200  # chars around the query match for snippet generation
@@ -68,19 +68,29 @@ class BM25Index:
         return len(self._bm25) if self._index is not None else 0
 
 
-def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> str:
-    """Extract a snippet centered on the window with the highest density of query-term matches.
+def query_terms(query: str) -> list[str]:
+    """Split a query the way BM25X tokenizes documents.
 
-    Query terms are split on non-alphanumeric characters (matching how BM25X
-    tokenizes documents, e.g. "GT/DPM" -> "gt", "dpm") instead of whitespace only,
-    so acronyms and punctuation-joined terms can still anchor the snippet. Among
-    all match positions, the one whose surrounding window covers the most distinct
-    query terms wins (ties broken by total match count, then earliest position) —
-    not just the first occurrence of the first term — so the snippet favors the
-    part of the segment where the query actually clusters. The window is then
-    snapped to word boundaries so it never cuts a word in half.
+    Splitting on non-alphanumerics (not just whitespace) keeps acronyms and
+    punctuation-joined terms usable as anchors, e.g. "GT/DPM" -> ["gt", "dpm"].
     """
-    terms = [t for t in re.split(r"\W+", query.lower()) if t]
+    return [t for t in re.split(r"\W+", query.lower()) if t]
+
+
+def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> Snippet:
+    """Extract the window with the highest density of query-term matches.
+
+    Returns the excerpt plus the offsets of every query match inside it.
+    Highlights are offsets rather than markup so each frontend renders them
+    its own way; see Snippet.
+
+    Among all match positions, the one whose surrounding window covers the most
+    distinct query terms wins (ties broken by total match count, then earliest
+    position) — not just the first occurrence of the first term — so the snippet
+    favors the part of the segment where the query actually clusters. The window
+    is then snapped to word boundaries so it never cuts a word in half.
+    """
+    terms = query_terms(query)
 
     matches: list[tuple[int, int, str]] = [
         (m.start(), m.end(), term)
@@ -89,7 +99,10 @@ def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> str
     ]
 
     if not matches:
-        return content[:window].rstrip() + ("…" if len(content) > window else "")
+        text = content[:window].rstrip()
+        if len(content) > window:
+            text += "\u2026"
+        return Snippet(text=text, highlights=[])
 
     def density(match: tuple[int, int, str]) -> tuple[int, int, int]:
         pos = match[0]
@@ -103,18 +116,36 @@ def make_snippet(content: str, query: str, window: int = _SNIPPET_WINDOW) -> str
     end = min(len(content), match_end + window // 2)
     snippet = content[start:end]
 
+    # Snap to word boundaries, tracking how far `start` moved so the highlight
+    # offsets below stay aligned with the final text.
     if start > 0:
         ws_positions = [p for p in (snippet.find(" "), snippet.find("\n"), snippet.find("\t")) if p != -1]
         if ws_positions:
-            snippet = snippet[min(ws_positions) + 1 :]
+            trimmed = min(ws_positions) + 1
+            snippet = snippet[trimmed:]
+            start += trimmed
     if end < len(content):
         last_ws = max(snippet.rfind(" "), snippet.rfind("\n"), snippet.rfind("\t"))
         if last_ws > 0:
+            end -= len(snippet) - last_ws
             snippet = snippet[:last_ws]
 
-    snippet = snippet.strip() or content[start:end].strip()
-    if start > 0:
-        snippet = "…" + snippet
-    if end < len(content):
-        snippet = snippet + "…"
-    return snippet
+    stripped = snippet.strip()
+    if stripped:
+        start += len(snippet) - len(snippet.lstrip())
+        snippet = stripped
+    else:
+        snippet = content[start:end].strip()
+
+    prefix = "\u2026" if start > 0 else ""
+    suffix = "\u2026" if end < len(content) else ""
+
+    # Offsets are relative to the excerpt, shifted by any leading ellipsis.
+    highlights = [
+        Highlight(start=s - start + len(prefix), end=e - start + len(prefix))
+        for s, e, _ in matches
+        if s >= start and e <= end
+    ]
+    highlights.sort(key=lambda h: h.start)
+
+    return Snippet(text=prefix + snippet + suffix, highlights=highlights)
