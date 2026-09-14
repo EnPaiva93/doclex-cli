@@ -29,6 +29,7 @@ class Config:
         )
 
         self.bm25_index_dir = self.cache_dir / "bm25_index"
+        self.title_index_dir = self.cache_dir / "title_index"
 
         self.top_k = int(os.environ.get("DOCLEX_TOP_K", "10"))
         self.debounce_secs = float(os.environ.get("DOCLEX_DEBOUNCE", "1.0"))
