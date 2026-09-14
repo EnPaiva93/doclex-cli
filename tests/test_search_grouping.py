@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from doclex.metadata.models import PassageResult, Snippet
+from pathlib import Path
+
+from doclex.index.title_index import TitleIndex
+from doclex.metadata.models import FileRecord, PassageResult, Snippet
 from doclex.pipeline import _document_score
 
 
@@ -35,3 +38,47 @@ def test_document_score_ignores_passages_beyond_the_weighted_ones() -> None:
     )
 
     assert three == five
+
+
+# ------------------------------------------------------------------
+# Title index
+# ------------------------------------------------------------------
+
+def _file(file_id: int, path: str) -> FileRecord:
+    return FileRecord(
+        id=file_id, path=path, hash="h", mtime=0.0, size=1,
+        mime_type="application/pdf", status="indexed",
+    )
+
+
+def test_title_index_matches_on_file_name() -> None:
+    index = TitleIndex()
+    index.build([
+        _file(1, "/docs/IPE-09 VACACIONES ANUALES REMUNERADAS.pdf"),
+        _file(2, "/docs/IPE-43 LIQUIDACION DE SUELDOS.pdf"),
+    ])
+
+    scores = index.search("vacaciones", 5)
+
+    assert scores.get(1, 0) > scores.get(2, 0)
+
+
+def test_title_index_matches_on_containing_folders() -> None:
+    """A folder name describes what is inside it as surely as a file name does."""
+    root = Path("/docs")
+    index = TitleIndex()
+    index.build([
+        _file(1, "/docs/vacaciones/Formulario 12.pdf"),
+        _file(2, "/docs/sueldos/Formulario 13.pdf"),
+    ], root)
+
+    scores = index.search("vacaciones", 5)
+
+    assert scores.get(1, 0) > scores.get(2, 0)
+
+
+def test_title_index_is_empty_without_files() -> None:
+    index = TitleIndex()
+    index.build([])
+
+    assert index.search("cualquier cosa", 5) == {}

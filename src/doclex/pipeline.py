@@ -9,6 +9,7 @@ from doclex.cache.store import CacheStore
 from doclex.config import Config
 from doclex.extraction.extractor import ExtractionError, extract
 from doclex.index.bm25_index import BM25Index, make_snippet
+from doclex.index.title_index import TitleIndex
 from doclex.ingestion.scanner import ChangeSet, file_hash, file_record_from_disk, reconcile
 from doclex.ingestion.watcher import FileWatcher
 from doclex.metadata.db import Database
@@ -24,6 +25,12 @@ _CANDIDATE_FACTOR = 5
 # dominates; further matches add a little, rewarding coverage without letting
 # long documents win on volume alone.
 _PASSAGE_WEIGHTS = (1.0, 0.25, 0.10)
+
+# How much a file-name match counts next to a body match. Body evidence still
+# leads; the title breaks ties between documents that quote the same words.
+# Sweeping 0.5 to 4.0 over the sample queries moved no top result, so this is
+# set conservatively rather than tuned — it wants a relevance set to pin down.
+_TITLE_WEIGHT = 1.5
 
 
 def _document_score(passages: list[PassageResult]) -> float:
@@ -41,6 +48,7 @@ class Pipeline:
         self._db = Database(config.db_path)
         self._cache = CacheStore(config.cache_dir)
         self._index = BM25Index(config.bm25_index_dir)
+        self._titles = TitleIndex()
         self._watcher: FileWatcher | None = None
 
     # ------------------------------------------------------------------
@@ -50,6 +58,7 @@ class Pipeline:
     async def startup(self) -> None:
         await self._db.connect()
         await self._load_or_rebuild_index()
+        self._titles.build(await self._db.get_all_files(), self._config.folder)
 
     async def shutdown(self) -> None:
         self._index.save()
@@ -178,6 +187,7 @@ class Pipeline:
         # Over-fetch passages so grouping still has enough distinct documents
         # left after several passages collapse into the same file.
         hits = self._index.search(query, k * _CANDIDATE_FACTOR)
+        title_scores = self._titles.search(query, k * _CANDIDATE_FACTOR)
         if not hits:
             return []
 
@@ -212,9 +222,10 @@ class Pipeline:
                 )
             )
 
-        for doc in by_file.values():
+        for file_id, doc in by_file.items():
             doc.passages.sort(key=lambda p: p.score, reverse=True)
             doc.score = _document_score(doc.passages)
+            doc.score += _TITLE_WEIGHT * title_scores.get(file_id, 0.0)
             doc.passages = doc.passages[:passages_per_document]
 
         ranked = sorted(by_file.values(), key=lambda d: d.score, reverse=True)
