@@ -44,8 +44,7 @@ def _resolve_project(name: str) -> Project:
 
 
 def _build_pipeline(project: Project, *, create: bool = False) -> Pipeline:
-    os.environ["DOCLEX_FOLDER"] = str(project.folder)
-    config = Config()
+    config = Config.from_env(project.folder)
     if create:
         config.ensure_dirs()
     elif not config.cache_dir.exists():
