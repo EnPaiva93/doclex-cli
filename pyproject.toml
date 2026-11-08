@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "doclex-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local document search — BM25 lexical search over PDFs, DOCX, XLSX, CSV, Markdown and TXT files. No embeddings, no vector DB, no cloud."
 readme = "README.md"
 license = "MIT"

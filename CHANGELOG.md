@@ -5,6 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-08
+
+### Fixed
+
+- Search scanned the whole segments table on every query to map index ids back to segments, so its cost grew with the corpus: on 25,000 segments that lookup took 94 ms of a 110 ms search. The lookup is now indexed and search takes 10-13 ms. Existing indexes pick this up when next opened; no reindex is needed.
+
 ## [0.2.0] - 2026-09-14
 
 Search returns **documents, not fragments**, cited by page. Upgrading requires a full reindex (`doclex index --project <name> --force`); Doclex warns when it finds an index built by an older version.
