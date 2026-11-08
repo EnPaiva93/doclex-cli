@@ -288,3 +288,33 @@ async def test_get_all_segments_returns_all_with_file_path(db: Database) -> None
 
 async def test_get_all_segments_empty_when_no_files(db: Database) -> None:
     assert await db.get_all_segments() == []
+
+
+async def test_segment_lookup_by_bm25_id_uses_index(db: Database) -> None:
+    """Search resolves every result page by bm25_doc_id; a table scan here made
+    each query cost time proportional to the whole corpus."""
+    async with db.conn.execute(
+        "EXPLAIN QUERY PLAN SELECT * FROM segments WHERE bm25_doc_id IN (1, 2)"
+    ) as cursor:
+        plan = " ".join(row[3] for row in await cursor.fetchall())
+    assert "USING INDEX idx_segs_bm25" in plan
+
+
+async def test_existing_database_gains_bm25_index_on_connect(tmp_path: Path) -> None:
+    """Databases created before the index existed get it without reindexing."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    database = Database(path)
+    await database.connect()
+    await database.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP INDEX idx_segs_bm25")
+
+    database = Database(path)
+    await database.connect()
+    async with database.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_segs_bm25'"
+    ) as cursor:
+        assert await cursor.fetchone() is not None
+    await database.close()

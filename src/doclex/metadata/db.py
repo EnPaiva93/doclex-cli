@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE INDEX IF NOT EXISTS idx_files_path   ON files(path);
 CREATE INDEX IF NOT EXISTS idx_files_hash   ON files(hash);
 CREATE INDEX IF NOT EXISTS idx_segs_file_id ON segments(file_id);
+CREATE INDEX IF NOT EXISTS idx_segs_bm25    ON segments(bm25_doc_id);
 """
 
 
