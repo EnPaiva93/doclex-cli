@@ -12,17 +12,22 @@ from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from doclex.config import Config
-from doclex.engine import Engine, FileOutsideProjectError, IndexMissingError
-from doclex.registry import (
+from doclex import (
+    Config,
+    FileOutsideProjectError,
+    Indexer,
+    IndexMissingError,
     Project,
     ProjectAlreadyExistsError,
     ProjectFolderNotFoundError,
     ProjectNotFoundError,
     ProjectOverlapError,
     ProjectRegistry,
+    Searcher,
+    clean_label,
+    purge,
+    results_to_dict,
 )
-from doclex.results import clean_label, results_to_dict
 
 app = typer.Typer(
     name="doclex",
@@ -43,9 +48,13 @@ def _resolve_project(name: str) -> Project:
         raise typer.Exit(1)
 
 
-def _open_engine(project: Project, *, create: bool = False) -> Engine:
+def _open_indexer(project: Project) -> Indexer:
+    return Indexer(Config.from_env(project.folder))
+
+
+def _open_searcher(project: Project) -> Searcher:
     try:
-        return Engine.open(Config.from_env(project.folder), create=create)
+        return Searcher(Config.from_env(project.folder))
     except IndexMissingError:
         console.print(
             f"[yellow]No index found for project[/yellow] [bold]{project.name}[/bold] "
@@ -114,7 +123,7 @@ def remove(
         console.print(f"[green]✓[/green] Removed project '{name}' (its folder no longer exists).")
         return
 
-    removed = Engine.purge(config)
+    removed = purge(config)
     where = f" and its cache ({config.cache_dir})" if removed else ""
     console.print(f"[green]✓[/green] Removed project '{name}'{where}.")
 
@@ -152,11 +161,11 @@ def index(
         raise typer.Exit(1)
 
     proj = _resolve_project(project)
-    engine = _open_engine(proj, create=True)
+    indexer = _open_indexer(proj)
 
     if files:
         try:
-            files = engine.resolve_files(files)
+            files = indexer.resolve_files(files)
         except FileNotFoundError as exc:
             console.print(f"[red]Error:[/red] {exc}")
             raise typer.Exit(1)
@@ -167,7 +176,7 @@ def index(
             raise typer.Exit(1)
 
     async def run() -> None:
-        await engine.start()
+        await indexer.start()
 
         # ── Specific files reindex ───────────────────────────────────
         if files:
@@ -181,18 +190,18 @@ def index(
                 def on_progress_files(path: Path, action: str) -> None:
                     progress.update(task, advance=1, description=f"[cyan]{action}[/cyan] {path.name}")
 
-                await engine.reindex_files(files, on_progress=on_progress_files)
+                await indexer.reindex_files(files, on_progress=on_progress_files)
             console.print(f"[green]✓[/green] Reindexed {len(files)} file(s).")
-            await engine.close()
+            await indexer.close()
             return
 
         # ── Force full reindex ───────────────────────────────────────
         if force:
-            all_files = await engine.files()
+            all_files = await indexer.files()
             total = len(all_files)
             if total == 0:
                 console.print("[yellow]No files in index to reindex.[/yellow]")
-                await engine.close()
+                await indexer.close()
                 return
 
             console.print(f"[bold]Force reindexing[/bold] {total} files…")
@@ -206,15 +215,15 @@ def index(
                 def on_progress_force(path: Path, action: str) -> None:
                     progress.update(task, advance=1, description=f"[cyan]{action}[/cyan] {path.name}")
 
-                await engine.reindex_all(on_progress=on_progress_force)
+                await indexer.reindex_all(on_progress=on_progress_force)
             console.print("[green]✓[/green] Done.")
-            await engine.close()
+            await indexer.close()
             return
 
         # ── Incremental reconciliation ───────────────────────────────
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
             spin.add_task("Scanning folder…")
-            changes = await engine.scan()
+            changes = await indexer.scan()
 
         total = len(changes.new) + len(changes.modified) + len(changes.deleted)
 
@@ -236,11 +245,11 @@ def index(
                 def on_progress(path: Path, action: str) -> None:
                     progress.update(task, advance=1, description=f"[cyan]{action}[/cyan] {path.name}")
 
-                await engine.apply(changes, on_progress=on_progress)
+                await indexer.apply(changes, on_progress=on_progress)
 
             console.print("[green]✓[/green] Done.")
 
-        await engine.close()
+        await indexer.close()
 
     asyncio.run(run())
 
@@ -287,20 +296,20 @@ def search(
       doclex search "viaticos" --project docs --json
     """
     proj = _resolve_project(project)
-    engine = _open_engine(proj)
+    searcher = _open_searcher(proj)
 
     async def run() -> None:
         if as_json:
-            async with engine:
-                results = await engine.search(query, top_k, passages_per_document=passages)
+            async with searcher:
+                results = await searcher.search(query, top_k, passages_per_document=passages)
             print(json.dumps(results_to_dict(query, results, full), ensure_ascii=False, indent=2))
             return
 
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
             spin.add_task("Searching\u2026")
-            async with engine:
-                results = await engine.search(query, top_k, passages_per_document=passages)
-                outdated = await engine.index_is_outdated()
+            async with searcher:
+                results = await searcher.search(query, top_k, passages_per_document=passages)
+                outdated = await searcher.index_is_outdated()
 
         if outdated:
             console.print(
@@ -415,15 +424,15 @@ def status(
       doclex status --project docs --file report.pdf --file r3.pdf   # inspect specific files
     """
     proj = _resolve_project(project)
-    engine = _open_engine(proj)
+    searcher = _open_searcher(proj)
 
     async def run() -> None:
-        await engine.start()
+        await searcher.start()
 
         # ── Specific-file inspect ────────────────────────────────────
         if files:
             for f in files:
-                info = await engine.file_status(f)
+                info = await searcher.file_status(f)
                 rec = info["record"]
                 console.print()
 
@@ -451,14 +460,14 @@ def status(
 
                 console.print(t)
 
-            await engine.close()
+            await searcher.close()
             return
 
         # ── File list ────────────────────────────────────────────────
         if all_files:
-            file_list = await engine.files(filter_status)
-            no_text_paths = {f.path for f in await engine.files_without_text()}
-            await engine.close()
+            file_list = await searcher.files(filter_status)
+            no_text_paths = {f.path for f in await searcher.files_without_text()}
+            await searcher.close()
 
             if not file_list:
                 console.print("[yellow]No files found.[/yellow]")
@@ -487,8 +496,8 @@ def status(
             return
 
         # ── Corpus summary ───────────────────────────────────────────
-        info = await engine.status()
-        await engine.close()
+        info = await searcher.status()
+        await searcher.close()
 
         t = Table(show_header=False, box=None, padding=(0, 2))
         t.add_column(style="bold dim")
