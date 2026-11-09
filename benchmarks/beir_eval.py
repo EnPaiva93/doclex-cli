@@ -10,6 +10,9 @@ Pipeline per document:
 At query time, segment scores are aggregated to doc level (max score)
 before evaluation so results are comparable against BEIR qrels.
 
+Run through uv so doclex is imported from the project environment, as
+installed, rather than from a path patched onto sys.path:
+
 Usage:
     uv run python benchmarks/beir_eval.py
     uv run python benchmarks/beir_eval.py --label v2_tree --top-k 100
@@ -19,15 +22,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import sys
 import time
 import tracemalloc
 import urllib.request
 import zipfile
 from datetime import datetime
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from bm25x import BM25
 from ranx import Qrels, Run, evaluate

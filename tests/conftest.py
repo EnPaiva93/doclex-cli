@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import textwrap
 from pathlib import Path
 
@@ -57,11 +56,7 @@ def docs_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture()
 def config(docs_dir: Path, tmp_path: Path) -> Config:
-    cache_dir = tmp_path / ".cache"
-    os.environ["DOCLEX_FOLDER"] = str(docs_dir)
-    os.environ["DOCLEX_CACHE_DIR"] = str(cache_dir)
-    os.environ["DOCLEX_DB_PATH"] = str(cache_dir / "doclex.db")
-    cfg = Config()
+    cfg = Config(docs_dir, cache_dir=tmp_path / ".cache")
     cfg.ensure_dirs()
     return cfg
 

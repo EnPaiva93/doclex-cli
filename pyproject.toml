@@ -28,6 +28,7 @@ doclex = "doclex.cli:app"
 
 [project.optional-dependencies]
 dev = [
+    "import-linter>=2.16",
     "pytest",
     "pytest-asyncio",
     "ranx",
@@ -36,6 +37,62 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# Architecture contracts, checked by `lint-imports` and by tests/test_architecture.py.
+# The engine never knows who its clients are; clients only use the public API in
+# doclex/__init__.py; and each layer only reaches down.
+[tool.importlinter]
+root_package = "doclex"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "The engine does not depend on its clients or their UI libraries"
+type = "forbidden"
+source_modules = [
+    "doclex.engine",
+    "doclex.pipeline",
+    "doclex.results",
+    "doclex.registry",
+    "doclex.config",
+    "doclex.cache",
+    "doclex.extraction",
+    "doclex.index",
+    "doclex.ingestion",
+    "doclex.metadata",
+    "doclex.segmentation",
+]
+forbidden_modules = ["doclex.cli", "typer", "rich"]
+
+[[tool.importlinter.contracts]]
+name = "The CLI uses only the public API"
+type = "forbidden"
+source_modules = ["doclex.cli"]
+forbidden_modules = [
+    "doclex.engine",
+    "doclex.pipeline",
+    "doclex.results",
+    "doclex.registry",
+    "doclex.config",
+    "doclex.cache",
+    "doclex.extraction",
+    "doclex.index",
+    "doclex.ingestion",
+    "doclex.metadata",
+    "doclex.segmentation",
+]
+# The public API re-exports these, so reaching them through `doclex` is the point.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Layers only reach down"
+type = "layers"
+layers = [
+    "doclex.cli",
+    "doclex.engine | doclex.results | doclex.registry",
+    "doclex.pipeline",
+    "doclex.cache | doclex.extraction | doclex.index | doclex.ingestion | doclex.segmentation",
+    "doclex.metadata | doclex.config",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/doclex"]

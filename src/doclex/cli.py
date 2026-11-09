@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import re
-import shutil
 from pathlib import Path
 
 import typer
@@ -13,15 +12,21 @@ from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from doclex.config import Config
-from doclex.pipeline import Pipeline
-from doclex.registry import (
+from doclex import (
+    Config,
+    FileOutsideProjectError,
+    Indexer,
+    IndexMissingError,
     Project,
     ProjectAlreadyExistsError,
     ProjectFolderNotFoundError,
     ProjectNotFoundError,
     ProjectOverlapError,
     ProjectRegistry,
+    Searcher,
+    clean_label,
+    purge,
+    results_to_dict,
 )
 
 app = typer.Typer(
@@ -43,18 +48,19 @@ def _resolve_project(name: str) -> Project:
         raise typer.Exit(1)
 
 
-def _build_pipeline(project: Project, *, create: bool = False) -> Pipeline:
-    os.environ["DOCLEX_FOLDER"] = str(project.folder)
-    config = Config()
-    if create:
-        config.ensure_dirs()
-    elif not config.cache_dir.exists():
+def _open_indexer(project: Project) -> Indexer:
+    return Indexer(Config.from_env(project.folder))
+
+
+def _open_searcher(project: Project) -> Searcher:
+    try:
+        return Searcher(Config.from_env(project.folder))
+    except IndexMissingError:
         console.print(
             f"[yellow]No index found for project[/yellow] [bold]{project.name}[/bold] "
             f"({project.folder}). Run [bold]doclex index --project {project.name}[/bold] first."
         )
         raise typer.Exit(0)
-    return Pipeline(config)
 
 
 # ------------------------------------------------------------------
@@ -110,9 +116,16 @@ def remove(
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1)
 
-    cache_dir = project.folder / ".doclex"
-    shutil.rmtree(cache_dir, ignore_errors=True)
-    console.print(f"[green]✓[/green] Removed project '{name}' and its cache ({cache_dir}).")
+    try:
+        config = Config.from_env(project.folder)
+    except ValueError:
+        # The folder is gone, and with it the default cache that lived inside.
+        console.print(f"[green]✓[/green] Removed project '{name}' (its folder no longer exists).")
+        return
+
+    removed = purge(config)
+    where = f" and its cache ({config.cache_dir})" if removed else ""
+    console.print(f"[green]✓[/green] Removed project '{name}'{where}.")
 
 
 # ------------------------------------------------------------------
@@ -148,22 +161,22 @@ def index(
         raise typer.Exit(1)
 
     proj = _resolve_project(project)
+    indexer = _open_indexer(proj)
 
     if files:
-        for f in files:
-            if not f.exists():
-                console.print(f"[red]Error:[/red] File not found: {f}")
-                raise typer.Exit(1)
-            if not f.resolve().is_relative_to(proj.folder):
-                console.print(
-                    f"[red]Error:[/red] {f} is not inside project '{proj.name}' ({proj.folder})"
-                )
-                raise typer.Exit(1)
-
-    pipeline = _build_pipeline(proj, create=True)
+        try:
+            files = indexer.resolve_files(files)
+        except FileNotFoundError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1)
+        except FileOutsideProjectError as exc:
+            console.print(
+                f"[red]Error:[/red] {exc.path} is not inside project '{proj.name}' ({proj.folder})"
+            )
+            raise typer.Exit(1)
 
     async def run() -> None:
-        await pipeline.startup()
+        await indexer.start()
 
         # ── Specific files reindex ───────────────────────────────────
         if files:
@@ -173,20 +186,22 @@ def index(
                 console=console,
             ) as progress:
                 task = progress.add_task("", total=len(files))
-                for f in files:
-                    progress.update(task, advance=1, description=f"[cyan]reindexing[/cyan] {f.name}")
-                    await pipeline.reindex_file(f)
+
+                def on_progress_files(path: Path, action: str) -> None:
+                    progress.update(task, advance=1, description=f"[cyan]{action}[/cyan] {path.name}")
+
+                await indexer.reindex_files(files, on_progress=on_progress_files)
             console.print(f"[green]✓[/green] Reindexed {len(files)} file(s).")
-            await pipeline.shutdown()
+            await indexer.close()
             return
 
         # ── Force full reindex ───────────────────────────────────────
         if force:
-            all_files = await pipeline.list_files()
+            all_files = await indexer.files()
             total = len(all_files)
             if total == 0:
                 console.print("[yellow]No files in index to reindex.[/yellow]")
-                await pipeline.shutdown()
+                await indexer.close()
                 return
 
             console.print(f"[bold]Force reindexing[/bold] {total} files…")
@@ -200,15 +215,15 @@ def index(
                 def on_progress_force(path: Path, action: str) -> None:
                     progress.update(task, advance=1, description=f"[cyan]{action}[/cyan] {path.name}")
 
-                await pipeline.reindex_all(on_progress=on_progress_force)
+                await indexer.reindex_all(on_progress=on_progress_force)
             console.print("[green]✓[/green] Done.")
-            await pipeline.shutdown()
+            await indexer.close()
             return
 
         # ── Incremental reconciliation ───────────────────────────────
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
             spin.add_task("Scanning folder…")
-            changes = await pipeline.reconcile()
+            changes = await indexer.scan()
 
         total = len(changes.new) + len(changes.modified) + len(changes.deleted)
 
@@ -230,11 +245,11 @@ def index(
                 def on_progress(path: Path, action: str) -> None:
                     progress.update(task, advance=1, description=f"[cyan]{action}[/cyan] {path.name}")
 
-                await pipeline.apply_changes(changes, on_progress=on_progress)
+                await indexer.apply(changes, on_progress=on_progress)
 
             console.print("[green]✓[/green] Done.")
 
-        await pipeline.shutdown()
+        await indexer.close()
 
     asyncio.run(run())
 
@@ -281,22 +296,20 @@ def search(
       doclex search "viaticos" --project docs --json
     """
     proj = _resolve_project(project)
-    pipeline = _build_pipeline(proj)
+    searcher = _open_searcher(proj)
 
     async def run() -> None:
         if as_json:
-            await pipeline.startup()
-            results = await pipeline.search(query, top_k, passages_per_document=passages)
-            await pipeline.shutdown()
-            print(json.dumps(_results_to_json(query, results, full), ensure_ascii=False, indent=2))
+            async with searcher:
+                results = await searcher.search(query, top_k, passages_per_document=passages)
+            print(json.dumps(results_to_dict(query, results, full), ensure_ascii=False, indent=2))
             return
 
         with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console, transient=True) as spin:
             spin.add_task("Searching\u2026")
-            await pipeline.startup()
-            results = await pipeline.search(query, top_k, passages_per_document=passages)
-            outdated = await pipeline.index_is_outdated()
-            await pipeline.shutdown()
+            async with searcher:
+                results = await searcher.search(query, top_k, passages_per_document=passages)
+                outdated = await searcher.index_is_outdated()
 
         if outdated:
             console.print(
@@ -328,7 +341,7 @@ def _print_document(rank: int, doc, full: bool, root: Path | None = None) -> Non
         console.print(f"    [dim]{escape(parent)}[/dim]")
 
     for p in doc.passages:
-        location = _clean_label(p.location_label)
+        location = clean_label(p.location_label)
         text = escape(p.content) if full else _clean_text(_highlight(p.snippet))
         console.print(f"    [dim]{escape(location)}[/dim]")
         # Heading-only segments repeat their label as their whole body; printing
@@ -371,54 +384,10 @@ def _strip_markup(text: str) -> str:
     return re.sub(r"\[/?bold\]", "", text)
 
 
-def _clean_label(label: str) -> str:
-    """Turn an internal location label into a citation a reader can use.
-
-    Drops markdown carried over from extraction, and the trailing "> N" that the
-    size splitter appends: that number is the index of an internal chunk, not a
-    page or a section, so it means nothing to whoever reads the result.
-    """
-    label = re.sub(r"\s*\u203a\s*\d+\s*$", "", label)
-    label = label.replace("**", "").replace("#", "")
-    return " ".join(label.split())
-
-
 def _clean_text(text: str) -> str:
     """Flatten a snippet for one-line display, without disturbing offsets."""
     text = re.sub(r"(?:^|(?<=\s))#{1,6}\s*", "", text.replace("**", ""))
     return " ".join(text.split())
-
-
-def _results_to_json(query: str, results: list, full: bool) -> dict:
-    return {
-        "query": query,
-        "total": len(results),
-        "results": [
-            {
-                "file_id": doc.file_id,
-                "filename": doc.filename,
-                "path": doc.file_path,
-                "mime_type": doc.mime_type,
-                "score": round(doc.score, 4),
-                "passages": [
-                    {
-                        "segment_id": p.segment_id,
-                        "score": round(p.score, 4),
-                        "location_type": p.location_type,
-                        "location_label": _clean_label(p.location_label),
-                        "location_index": p.location_index,
-                        "snippet": p.snippet.text,
-                        "highlights": [
-                            {"start": h.start, "end": h.end} for h in p.snippet.highlights
-                        ],
-                        **({"content": p.content} if full else {}),
-                    }
-                    for p in doc.passages
-                ],
-            }
-            for doc in results
-        ],
-    }
 
 
 # ------------------------------------------------------------------
@@ -455,15 +424,15 @@ def status(
       doclex status --project docs --file report.pdf --file r3.pdf   # inspect specific files
     """
     proj = _resolve_project(project)
-    pipeline = _build_pipeline(proj)
+    searcher = _open_searcher(proj)
 
     async def run() -> None:
-        await pipeline.startup()
+        await searcher.start()
 
         # ── Specific-file inspect ────────────────────────────────────
         if files:
             for f in files:
-                info = await pipeline.get_file_status(f)
+                info = await searcher.file_status(f)
                 rec = info["record"]
                 console.print()
 
@@ -491,14 +460,14 @@ def status(
 
                 console.print(t)
 
-            await pipeline.shutdown()
+            await searcher.close()
             return
 
         # ── File list ────────────────────────────────────────────────
         if all_files:
-            file_list = await pipeline.list_files(filter_status)
-            no_text_paths = {f.path for f in await pipeline.files_without_text()}
-            await pipeline.shutdown()
+            file_list = await searcher.files(filter_status)
+            no_text_paths = {f.path for f in await searcher.files_without_text()}
+            await searcher.close()
 
             if not file_list:
                 console.print("[yellow]No files found.[/yellow]")
@@ -527,8 +496,8 @@ def status(
             return
 
         # ── Corpus summary ───────────────────────────────────────────
-        info = await pipeline.corpus_status()
-        await pipeline.shutdown()
+        info = await searcher.status()
+        await searcher.close()
 
         t = Table(show_header=False, box=None, padding=(0, 2))
         t.add_column(style="bold dim")
