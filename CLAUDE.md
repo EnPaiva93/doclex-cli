@@ -344,3 +344,5 @@ Doclex MCP debe convertir una carpeta local de documentos en un corpus buscable 
 - Instalar dependencias con uv, no con pip
 - Usar pyproject.toml para gestión del proyecto
 - No crear archivos de código sin antes mostrar el plan completo y recibir confirmación
+- La API pública del motor es `doclex/__init__.py` (`Config`, `Indexer`, `Searcher`, `purge`, modelos de resultado, registro de proyectos). Los clientes (CLI, MCP) importan solo desde ahí
+- La arquitectura se verifica con import-linter (contratos en `pyproject.toml`, ejecutados por `tests/test_architecture.py`): el motor no importa `doclex.cli`, `typer` ni `rich`; la CLI no importa módulos internos; cada capa solo depende de las de abajo (`cli` → `engine`/`results`/`registry` → `pipeline` → componentes → `metadata`/`config`). Si un cambio rompe un contrato, se corrige el diseño, no el contrato
